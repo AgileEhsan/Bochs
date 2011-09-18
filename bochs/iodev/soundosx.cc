@@ -25,17 +25,17 @@
 #endif
 
 #include "iodev.h"
+#include "soundmod.h"
+#include "soundosx.h"
 
 #if defined(macintosh) && BX_SUPPORT_SOUNDLOW
 
 #define LOG_THIS device->
 
-#include "soundmod.h"
-#include "soundosx.h"
-
 #if BX_WITH_MACOS
 #include <QuickTimeMusic.h>
 #else
+#include <CoreServices/CoreServices.h>
 #include <CoreAudio/CoreAudio.h>
 #include <AudioUnit/AudioUnit.h>
 #include <AudioToolbox/DefaultAudioOutput.h>
@@ -45,11 +45,18 @@
 #endif
 #include <string.h>
 
+#if (MAC_OS_X_VERSION_MAX_ALLOWED >= 1030)
+#define BX_SOUND_OSX_CONVERTER_NEW_API 1
+#endif
+
 #ifdef BX_SOUND_OSX_use_converter
-OSStatus MyRenderer (void *inRefCon, AudioUnitRenderActionFlags inActionFlags,
-    const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, AudioBuffer *ioData);
-OSStatus MyACInputProc (AudioConverterRef inAudioConverter, UInt32* outDataSize,
-    void** outData, void* inUserData);
+#ifndef BX_SOUND_OSX_CONVERTER_NEW_API
+OSStatus MyRenderer (void *inRefCon, AudioUnitRenderActionFlags inActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, AudioBuffer *ioData);
+OSStatus MyACInputProc (AudioConverterRef inAudioConverter, UInt32* outDataSize, void** outData, void* inUserData);
+#else
+OSStatus MyRenderer (void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData);
+OSStatus MyACInputProc (AudioConverterRef inAudioConverter, UInt32 *ioNumberDataPackets, AudioBufferList *ioData, AudioStreamPacketDescription **outDataPacketDescription, void *inUserData);
+#endif
 #endif
 
 // Global variables
@@ -89,7 +96,7 @@ bx_sound_osx_c::~bx_sound_osx_c()
 
 int bx_sound_osx_c::midiready()
 {
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 int bx_sound_osx_c::openmidioutput(const char *mididev)
@@ -102,17 +109,17 @@ int bx_sound_osx_c::openmidioutput(const char *mididev)
     NewAUGraph (&MidiGraph);
 
     // Open the DLS Synth
-    description.componentType           = kAudioUnitComponentType;
-    description.componentSubType        = kAudioUnitSubType_MusicDevice;
-    description.componentManufacturer   = kAudioUnitID_DLSSynth;
+    description.componentType           = kAudioUnitType_MusicDevice;
+    description.componentSubType        = kAudioUnitSubType_DLSSynth;
+    description.componentManufacturer   = kAudioUnitManufacturer_Apple;
     description.componentFlags          = 0;
     description.componentFlagsMask      = 0;
     AUGraphNewNode (MidiGraph, &description, 0, NULL, &synthNode);
 
     // Open the output device
-    description.componentType           = kAudioUnitComponentType;
-    description.componentSubType        = kAudioUnitSubType_Output;
-    description.componentManufacturer   = kAudioUnitID_DefaultOutput;
+    description.componentType           = kAudioUnitType_Output;
+    description.componentSubType        = kAudioUnitSubType_DefaultOutput;
+    description.componentManufacturer   = kAudioUnitManufacturer_Apple;
     description.componentFlags          = 0;
     description.componentFlagsMask      = 0;
     AUGraphNewNode (MidiGraph, &description, 0, NULL, &outputNode);
@@ -136,13 +143,13 @@ int bx_sound_osx_c::openmidioutput(const char *mididev)
 #endif
     BX_DEBUG(("openmidioutput(%s)", mididev));
     MidiOpen = 1;
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 int bx_sound_osx_c::sendmidicommand(int delta, int command, int length, Bit8u data[])
 {
     BX_DEBUG(("sendmidicommand(%i,%02x,%i)", delta, command, length));
-    if (!MidiOpen) return BX_SOUND_OUTPUT_ERR;
+    if (!MidiOpen) return BX_SOUNDLOW_ERR;
 
 #ifdef BX_SOUND_OSX_use_converter
     if (length <= 2) {
@@ -154,7 +161,7 @@ int bx_sound_osx_c::sendmidicommand(int delta, int command, int length, Bit8u da
         MusicDeviceSysEx (synthUnit, data, length);
     }
 #endif
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 int bx_sound_osx_c::closemidioutput()
@@ -165,7 +172,7 @@ int bx_sound_osx_c::closemidioutput()
     AUGraphStop (MidiGraph);
     AUGraphClose (MidiGraph);
 #endif
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 #ifdef BX_SOUND_OSX_use_quicktime
@@ -189,31 +196,105 @@ int bx_sound_osx_c::openwaveoutput(const char *wavedev)
     // open the default output unit
 #ifdef BX_SOUND_OSX_use_quicktime
     err = SndNewChannel (&WaveChannel, sampledSynth, 0, NewSndCallBackUPP(WaveCallbackProc));
-    if (err != noErr) return BX_SOUND_OUTPUT_ERR;
+    if (err != noErr) return BX_SOUNDLOW_ERR;
 #endif
 #ifdef BX_SOUND_OSX_use_converter
+#ifndef BX_SOUND_OSX_CONVERTER_NEW_API
     err = OpenDefaultAudioOutput (&WaveOutputUnit);
-    if (err != noErr) return BX_SOUND_OUTPUT_ERR;
-    AudioUnitInitialize (WaveOutputUnit);
+    if (err != noErr) return BX_SOUNDLOW_ERR;
 
-    // Set up a callback function to generate output to the output unit
     AudioUnitInputCallback input;
     input.inputProc = MyRenderer;
     input.inputProcRefCon = (void *) this;
     AudioUnitSetProperty (WaveOutputUnit, kAudioUnitProperty_SetInputCallback,
         kAudioUnitScope_Global, 0, &input, sizeof(input));
+#else
+    ComponentDescription desc;
+    desc.componentType = kAudioUnitType_Output;
+    desc.componentSubType = kAudioUnitSubType_DefaultOutput;
+    desc.componentManufacturer = kAudioUnitManufacturer_Apple;
+    desc.componentFlags = 0;
+    desc.componentFlagsMask = 0;
+
+    Component c = FindNextComponent(NULL, &desc);
+    if (c == NULL) {
+      BX_ERROR(("Core Audio: Unable to find default audio output component\n"));
+      return BX_SOUNDLOW_ERR;
+    }
+    err = OpenAComponent(c, &WaveOutputUnit);
+    if (err) {
+      BX_ERROR(("Core Audio: Unable to open audio output (err=%X)\n", (unsigned int)err));
+      return BX_SOUNDLOW_ERR;
+    } 
+
+    AURenderCallbackStruct input;
+    input.inputProc = MyRenderer;
+    input.inputProcRefCon = (void *) this;
+    err = AudioUnitSetProperty (WaveOutputUnit,
+        kAudioUnitProperty_SetRenderCallback,
+        kAudioUnitScope_Input, 0, &input, sizeof(input));
+    if (err) {
+      BX_ERROR(("Core Audio: AudioUnitSetProperty error (err=%X)\n", (unsigned int)err));
+      return BX_SOUNDLOW_ERR;
+    }
+#endif
+    err = AudioUnitInitialize (WaveOutputUnit);
+    if (err) {
+      BX_ERROR(("Core Audio: AudioUnitInitialize error (err=%X)\n", (unsigned int)err));
+      return BX_SOUNDLOW_ERR;
+    } 
 #endif
 
     WaveOpen = 1;
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
-int bx_sound_osx_c::startwaveplayback(int frequency, int bits, int stereo, int format)
+#ifdef BX_SOUND_OSX_use_converter
+OSStatus bx_sound_osx_c::core_audio_pause() {
+  OSStatus err = noErr;
+
+  if (WaveOutputUnit) {
+    err = AudioOutputUnitStop (WaveOutputUnit);
+    if (err) {
+      BX_ERROR(("Core Audio: nextbuffer(): AudioOutputUnitStop (err=%X)\n", (unsigned int)err)); 
+    }
+    WavePlaying = 0;
+  }
+
+  return err;
+}
+
+OSStatus bx_sound_osx_c::core_audio_resume() {
+  OSStatus err = noErr;
+
+  if (WaveConverter) {
+    err = AudioConverterReset (WaveConverter);
+    if (err) {
+      BX_ERROR(("Core Audio: core_audio_resume(): AudioConverterReset (err=%X)\n", (unsigned int)err)); 
+      return err;
+    }
+  }
+  if (WaveOutputUnit) {
+    err = AudioOutputUnitStart (WaveOutputUnit);
+    if (err) {
+      BX_ERROR(("Core Audio: core_audio_resume(): AudioOutputUnitStart (err=%X)\n", (unsigned int)err)); 
+      return err;
+    }
+    WavePlaying = 1;
+  }
+
+  return err;
+}
+#endif
+
+int bx_sound_osx_c::startwaveplayback(int frequency, int bits, bx_bool stereo, int format)
 {
 #ifdef BX_SOUND_OSX_use_converter
-    static int oldfreq, oldbits, oldstereo, oldformat;
+    static int oldfreq, oldbits, oldformat;
+    static bx_bool oldstereo;
     AudioStreamBasicDescription srcFormat, dstFormat;
     UInt32 formatSize = sizeof(AudioStreamBasicDescription);
+    OSStatus err;
 #endif
 
     BX_DEBUG(("startwaveplayback(%d, %d, %d, %x)", frequency, bits, stereo, format));
@@ -240,7 +321,7 @@ int bx_sound_osx_c::startwaveplayback(int frequency, int bits, int stereo, int f
         (bits == oldbits) &&
         (stereo == oldstereo) &&
         (format == oldformat))
-        return BX_SOUND_OUTPUT_OK;    // nothing to do
+      return BX_SOUNDLOW_OK;    // nothing to do
 
     oldfreq = frequency;
     oldbits = bits;
@@ -260,25 +341,61 @@ int bx_sound_osx_c::startwaveplayback(int frequency, int bits, int stereo, int f
     srcFormat.mChannelsPerFrame = channels;
     srcFormat.mBitsPerChannel = bytes * 8;
 
-    if (WavePlaying) AudioOutputUnitStop (WaveOutputUnit);
-    if (WaveConverter) AudioConverterDispose (WaveConverter);
+    if (WavePlaying) {
+      err = AudioOutputUnitStop (WaveOutputUnit);
+      if (err)
+        BX_ERROR(("Core Audio: startwaveplayback(): AudioOutputUnitStop (err=%X)\n", (unsigned int)err)); 
+    }
+    if (WaveConverter) {
+      err = AudioConverterDispose (WaveConverter);
+      if (err)
+        BX_ERROR(("Core Audio: startwaveplayback(): AudioConverterDispose (err=%X)\n", (unsigned int)err)); 
+    }
 
-    AudioUnitGetProperty (WaveOutputUnit, kAudioUnitProperty_StreamFormat,
+    err = AudioUnitGetProperty (WaveOutputUnit, kAudioUnitProperty_StreamFormat,
         kAudioUnitScope_Output, 0, &dstFormat, &formatSize);
+    if (err) {
+      BX_ERROR(("Core Audio: startwaveplayback(): AudioUnitGetProperty (err=%X)\n", (unsigned int)err)); 
+      return BX_SOUNDLOW_ERR;
+    }
 
-    AudioConverterNew (&srcFormat, &dstFormat, &WaveConverter);
+#ifdef BX_SOUND_OSX_CONVERTER_NEW_API
+    // force interleaved mode
+    dstFormat.mFormatFlags |= kAudioFormatFlagIsNonInterleaved;
+    dstFormat.mBytesPerPacket = dstFormat.mBytesPerFrame = (dstFormat.mBitsPerChannel + 7) / 8;
+    err = AudioUnitSetProperty (WaveOutputUnit, kAudioUnitProperty_StreamFormat,
+        kAudioUnitScope_Input, 0, &dstFormat, sizeof(dstFormat));
+    if (err) {
+      BX_ERROR(("Core Audio: startwaveplayback(): AudioUnitSetProperty (err=%X)\n", (unsigned int)err)); 
+      return BX_SOUNDLOW_ERR;
+    }
+#endif
+
+    err = AudioConverterNew (&srcFormat, &dstFormat, &WaveConverter);
+    if (err) {
+      BX_ERROR(("Core Audio: startwaveplayback(): AudioConverterNew (err=%X)\n", (unsigned int)err)); 
+      return BX_SOUNDLOW_ERR;
+    }
 
     if (srcFormat.mChannelsPerFrame == 1 && dstFormat.mChannelsPerFrame == 2) {
         // map single-channel input to both output channels
         SInt32 map[2] = {0,0};
-        AudioConverterSetProperty (WaveConverter, kAudioConverterChannelMap,
+        err = AudioConverterSetProperty (WaveConverter,
+                            kAudioConverterChannelMap, 
                             sizeof(map), (void*) map);
+        if (err) {
+          BX_ERROR(("Core Audio: startwaveplayback(): AudioConverterSetProperty (err=%X)\n", (unsigned int)err)); 
+          return BX_SOUNDLOW_ERR;
+        }
     }
 
-    if (WavePlaying) AudioOutputUnitStart (WaveOutputUnit);
+    if (WavePlaying) {
+      if (core_audio_resume() != noErr)
+        return BX_SOUNDLOW_ERR;
+    }
 #endif
 
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 int bx_sound_osx_c::waveready()
@@ -287,17 +404,17 @@ int bx_sound_osx_c::waveready()
     // have been sent, but possibly not yet played. There
     // should be a better way of doing this.
     if (WaveOpen && (head - tail < BX_SOUND_OSX_NBUF-4)) {
-        return BX_SOUND_OUTPUT_OK;
+        return BX_SOUNDLOW_OK;
     }
     else {
 #ifdef BX_SOUND_OSX_use_converter
         // If buffer is full, make sure sound is playing
-        if (WaveOutputUnit && !WavePlaying) {
-            AudioOutputUnitStart (WaveOutputUnit);
-            WavePlaying = 1;
+        if (!WavePlaying) {
+          if (core_audio_resume() != noErr)
+            return BX_SOUNDLOW_ERR;
         }
 #endif
-        return BX_SOUND_OUTPUT_ERR;
+        return BX_SOUNDLOW_ERR;
     }
 }
 
@@ -311,7 +428,7 @@ int bx_sound_osx_c::sendwavepacket(int length, Bit8u data[])
 
     // sanity check
     if ((!WaveOpen) || (head - tail >= BX_SOUND_OSX_NBUF))
-        return BX_SOUND_OUTPUT_ERR;
+        return BX_SOUNDLOW_ERR;
 
     // find next available buffer
     int n = head++ % BX_SOUND_OSX_NBUF;
@@ -328,8 +445,8 @@ int bx_sound_osx_c::sendwavepacket(int length, Bit8u data[])
 #ifdef BX_SOUND_OSX_use_converter
     // make sure that the sound is playing
     if (!WavePlaying) {
-        AudioOutputUnitStart (WaveOutputUnit);
-        WavePlaying = 1;
+      if (core_audio_resume() != noErr)
+        return BX_SOUNDLOW_ERR;
     }
 #endif
 
@@ -347,12 +464,12 @@ int bx_sound_osx_c::sendwavepacket(int length, Bit8u data[])
     SndDoCommand(WaveChannel, &mySndCommand, TRUE);
 #endif
 
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 int bx_sound_osx_c::stopwaveplayback()
 {
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 int bx_sound_osx_c::closewaveoutput()
@@ -366,16 +483,18 @@ int bx_sound_osx_c::closewaveoutput()
     WaveConverter = NULL;
     WaveOutputUnit = NULL;
 #endif
-    return BX_SOUND_OUTPUT_OK;
+    return BX_SOUNDLOW_OK;
 }
 
 #ifdef BX_SOUND_OSX_use_converter
+#ifndef BX_SOUND_OSX_CONVERTER_NEW_API
 OSStatus MyRenderer (void *inRefCon, AudioUnitRenderActionFlags inActionFlags,
     const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, AudioBuffer *ioData)
 {
+    OSStatus err;
     UInt32 size = ioData->mDataByteSize;
-    AudioConverterFillBuffer (WaveConverter, MyACInputProc, inRefCon, &size, ioData->mData);
-    return noErr;
+    err = AudioConverterFillBuffer (WaveConverter, MyACInputProc, inRefCon, &size, ioData->mData);
+    return err;
 }
 
 OSStatus MyACInputProc (AudioConverterRef inAudioConverter,
@@ -385,6 +504,52 @@ OSStatus MyACInputProc (AudioConverterRef inAudioConverter,
     self->nextbuffer ((int*) outDataSize, outData);
     return noErr;
 }
+#else
+OSStatus MyRenderer (void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData)
+{
+    UInt32 packets;
+    AudioStreamBasicDescription dstFormat;
+    UInt32 formatSize = sizeof(AudioStreamBasicDescription);
+    OSStatus err = noErr;
+
+    err = AudioConverterGetProperty (WaveConverter,
+      kAudioConverterCurrentOutputStreamDescription,
+      &formatSize, &dstFormat);
+    if (err) {
+      return err;
+    }    
+
+    packets = inNumberFrames / dstFormat.mFramesPerPacket; 
+    err = AudioConverterFillComplexBuffer(WaveConverter,
+      MyACInputProc, inRefCon, &packets, ioData, NULL);
+     
+    return err;
+}
+
+OSStatus MyACInputProc (AudioConverterRef inAudioConverter, UInt32 *ioNumberDataPackets, AudioBufferList *ioData, AudioStreamPacketDescription **outDataPacketDescription, void *inUserData)
+{
+    OSStatus err;
+    bx_sound_osx_c *self = (bx_sound_osx_c*) inUserData;
+    AudioStreamBasicDescription srcFormat;
+    UInt32 formatSize = sizeof(AudioStreamBasicDescription);
+
+    err = AudioConverterGetProperty (inAudioConverter,
+      kAudioConverterCurrentInputStreamDescription,
+      &formatSize, &srcFormat);
+    if (err) {
+      *ioNumberDataPackets = 0;
+      return err;
+    }    
+    int outDataSize = *ioNumberDataPackets * srcFormat.mBytesPerPacket;
+    void *outData = ioData->mBuffers[0].mData; 
+    self->nextbuffer ((int*) &outDataSize, &outData);
+    *ioNumberDataPackets = outDataSize / srcFormat.mBytesPerPacket;
+    ioData->mBuffers[0].mDataByteSize = outDataSize;
+    ioData->mBuffers[0].mData = outData; 
+
+    return noErr;
+}
+#endif
 
 void bx_sound_osx_c::nextbuffer (int *outDataSize, void **outData)
 {
@@ -394,8 +559,7 @@ void bx_sound_osx_c::nextbuffer (int *outDataSize, void **outData)
         *outDataSize = 0;
 
         // We are getting behind, so stop the output for now
-        AudioOutputUnitStop (WaveOutputUnit);
-        WavePlaying = 0;
+        core_audio_pause();
     }
     else {
         int n = tail % BX_SOUND_OSX_NBUF;
@@ -405,5 +569,72 @@ void bx_sound_osx_c::nextbuffer (int *outDataSize, void **outData)
     }
 }
 #endif
+
+int bx_sound_osx_c::openwaveinput(const char *wavedev, sound_record_handler_t rh)
+{
+  UNUSED(wavedev);
+  record_handler = rh;
+  if (rh != NULL) {
+    record_timer_index = bx_pc_system.register_timer(this, record_timer_handler, 1, 1, 0, "soundosx");
+    // record timer: inactive, continuous, frequency variable
+  }
+  // TODO
+  return BX_SOUNDLOW_OK;
+}
+
+int bx_sound_osx_c::startwaverecord(int frequency, int bits, bx_bool stereo, int format)
+{
+  Bit64u timer_val;
+  Bit8u shift = 0;
+
+  UNUSED(format);
+  if (record_timer_index != BX_NULL_TIMER_HANDLE) {
+    if (bits == 16) shift++;
+    if (stereo) shift++;
+    record_packet_size = (frequency / 10) << shift; // 0.1 sec
+    if (record_packet_size > BX_SOUNDLOW_WAVEPACKETSIZE) {
+      record_packet_size = BX_SOUNDLOW_WAVEPACKETSIZE;
+    }
+    timer_val = (Bit64u)record_packet_size * 1000000 / (frequency << shift);
+    bx_pc_system.activate_timer(record_timer_index, (Bit32u)timer_val, 1);
+  }
+  // TODO
+  return BX_SOUNDLOW_OK;
+}
+
+int bx_sound_osx_c::getwavepacket(int length, Bit8u data[])
+{
+  // TODO
+  memset(data, 0, length);
+  return BX_SOUNDLOW_OK;
+}
+
+int bx_sound_osx_c::stopwaverecord()
+{
+  if (record_timer_index != BX_NULL_TIMER_HANDLE) {
+    bx_pc_system.deactivate_timer(record_timer_index);
+  }
+  // TODO
+  return BX_SOUNDLOW_OK;
+}
+
+int bx_sound_osx_c::closewaveinput()
+{
+  stopwaverecord();
+  // TODO
+  return BX_SOUNDLOW_OK;
+}
+
+void bx_sound_osx_c::record_timer_handler(void *this_ptr)
+{
+  bx_sound_osx_c *class_ptr = (bx_sound_osx_c *) this_ptr;
+
+  class_ptr->record_timer();
+}
+
+void bx_sound_osx_c::record_timer(void)
+{
+  record_handler(this->device, record_packet_size);
+}
 
 #endif  // defined(macintosh)

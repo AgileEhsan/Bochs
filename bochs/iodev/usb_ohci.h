@@ -136,8 +136,6 @@ struct OHCI_ISO_TD {
 
 
 typedef struct {
-  Bit32u base_addr;
-
   int   frame_index;
   int   interval_index;
 
@@ -232,7 +230,6 @@ typedef struct {
     } HcRhPortStatus;
   } usb_port[BX_N_USB_OHCI_PORTS];
 
-  Bit8u pci_conf[256];
   Bit8u devfunc;
   unsigned ohci_done_count;
   bx_bool  use_control_head;
@@ -297,6 +294,8 @@ private:
   static void iolight_timer_handler(void *);
   void iolight_timer(void);
 
+  static void runtime_config_handler(void *);
+  void runtime_config(void);
 };
 
 #endif  // BX_IODEV_USB_OHCI_H

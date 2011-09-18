@@ -26,11 +26,6 @@
 #include "cpu.h"
 #define LOG_THIS BX_CPU_THIS_PTR
 
-// Make code more tidy with a few macros.
-#if BX_SUPPORT_X86_64==0
-#define RCX ECX
-#endif
-
 #if BX_CPU_LEVEL >= 6
 
 // Compare all pairs of Ai, Bj according to imm8 control
@@ -224,8 +219,7 @@ static Bit16u aggregate(Bit8u BoolRes[16][16], unsigned len1, unsigned len2, Bit
         }
       }
 
-      if (res)
-        result |= (1<<j);
+      if (res) result |= (1<<j);
     }
     break;
 
@@ -240,8 +234,7 @@ static Bit16u aggregate(Bit8u BoolRes[16][16], unsigned len1, unsigned len2, Bit
         }
       }
 
-      if (res)
-        result |= (1<<j);
+      if (res) result |= (1<<j);
     }
     break;
 
@@ -262,8 +255,7 @@ static Bit16u aggregate(Bit8u BoolRes[16][16], unsigned len1, unsigned len2, Bit
         }
       }
 
-      if (res)
-        result |= (1<<j);
+      if (res) result |= (1<<j);
     }
     break;
   }
@@ -286,12 +278,9 @@ static Bit16u aggregate(Bit8u BoolRes[16][16], unsigned len1, unsigned len2, Bit
   return result;
 }
 
-#endif // BX_CPU_LEVEL >= 6
-
 /* 66 0F 3A 60 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPESTRM_VdqWdqIbR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPESTRM_VdqWdqIbR(bxInstruction_c *i)
 {
-#if BX_CPU_LEVEL >= 6
   BxPackedXmmRegister op1 = BX_READ_XMM_REG(i->nnn());
   BxPackedXmmRegister op2 = BX_READ_XMM_REG(i->rm()), result;
   Bit8u imm8 = i->Ib();
@@ -341,13 +330,13 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPESTRM_VdqWdqIbR(bxInstruction_c *i)
   setEFlagsOSZAPC(flags);
 
   BX_WRITE_XMM_REGZ(0, result, i->getVL()); /* store result XMM0 */
-#endif
+
+  BX_NEXT_INSTR(i);
 }
 
 /* 66 0F 3A 61 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPESTRI_VdqWdqIbR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPESTRI_VdqWdqIbR(bxInstruction_c *i)
 {
-#if BX_CPU_LEVEL >= 6
   BxPackedXmmRegister op1 = BX_READ_XMM_REG(i->nnn()), op2 = BX_READ_XMM_REG(i->rm());
   Bit8u imm8 = i->Ib();
 
@@ -392,13 +381,13 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPESTRI_VdqWdqIbR(bxInstruction_c *i)
   if (result2 & 0x1)
     flags |= EFlagsOFMask;
   setEFlagsOSZAPC(flags);
-#endif
+
+  BX_NEXT_INSTR(i);
 }
 
 /* 66 0F 3A 62 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRM_VdqWdqIbR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRM_VdqWdqIbR(bxInstruction_c *i)
 {
-#if BX_CPU_LEVEL >= 6
   BxPackedXmmRegister op1 = BX_READ_XMM_REG(i->nnn());
   BxPackedXmmRegister op2 = BX_READ_XMM_REG(i->rm()), result;
   Bit8u imm8 = i->Ib();
@@ -439,13 +428,13 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRM_VdqWdqIbR(bxInstruction_c *i)
   setEFlagsOSZAPC(flags);
 
   BX_WRITE_XMM_REGZ(0, result, i->getVL()); /* store result XMM0 */
-#endif
+
+  BX_NEXT_INSTR(i);
 }
 
 /* 66 0F 3A 63 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRI_VdqWdqIbR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRI_VdqWdqIbR(bxInstruction_c *i)
 {
-#if BX_CPU_LEVEL >= 6
   BxPackedXmmRegister op1 = BX_READ_XMM_REG(i->nnn()), op2 = BX_READ_XMM_REG(i->rm());
   Bit8u imm8 = i->Ib();
 
@@ -481,5 +470,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::PCMPISTRI_VdqWdqIbR(bxInstruction_c *i)
   if (result2 & 0x1)
     flags |= EFlagsOFMask;
   setEFlagsOSZAPC(flags);
-#endif
+
+  BX_NEXT_INSTR(i);
 }
+
+#endif // BX_CPU_LEVEL >= 6

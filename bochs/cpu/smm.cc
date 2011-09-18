@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//   Copyright (c) 2006-2009 Stanislav Shwartsman
+//   Copyright (c) 2006-2011 Stanislav Shwartsman
 //          Written by Stanislav Shwartsman [sshwarts at sourceforge net]
 //
 //  This library is free software; you can redistribute it and/or
@@ -27,10 +27,6 @@
 #define LOG_THIS BX_CPU_THIS_PTR
 
 #if BX_CPU_LEVEL >= 3
-
-#if BX_SUPPORT_X86_64==0
-#define RIP EIP
-#endif
 
 //
 // Some of the CPU field must be saved and restored in order to continue the
@@ -64,7 +60,7 @@
 
 #define SMM_SAVE_STATE_MAP_SIZE 128
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::RSM(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::RSM(bxInstruction_c *i)
 {
   /* If we are not in System Management Mode, then #UD should be generated */
   if (! BX_CPU_THIS_PTR smm_mode()) {
@@ -111,6 +107,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RSM(bxInstruction_c *i)
   }
 
   // debug(RIP);
+
+  BX_NEXT_TRACE(i);
 }
 
 void BX_CPU_C::enter_system_management_mode(void)
@@ -178,14 +176,14 @@ void BX_CPU_C::enter_system_management_mode(void)
   BX_CPU_THIS_PTR cr0.set_TS(0); // no task switch (bit 3)
   BX_CPU_THIS_PTR cr0.set_PG(0); // paging disabled (bit 31)
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   BX_CPU_THIS_PTR cr4.set32(0);
 #endif
 
   // paging mode was changed - flush TLB
   TLB_flush(); //  Flush Global entries also
 
-#if BX_SUPPORT_X86_64
+#if BX_CPU_LEVEL >= 5
   BX_CPU_THIS_PTR efer.set32(0);
 #endif
 
@@ -244,6 +242,8 @@ void BX_CPU_C::enter_system_management_mode(void)
   BX_CPU_THIS_PTR sregs[BX_SEG_REG_ES] = BX_CPU_THIS_PTR sregs[BX_SEG_REG_DS];
   BX_CPU_THIS_PTR sregs[BX_SEG_REG_FS] = BX_CPU_THIS_PTR sregs[BX_SEG_REG_DS];
   BX_CPU_THIS_PTR sregs[BX_SEG_REG_GS] = BX_CPU_THIS_PTR sregs[BX_SEG_REG_DS];
+
+  BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_CONTEXT_SWITCH, 0);
 }
 
 #define SMRAM_TRANSLATE(addr)    (((0x8000 - (addr)) >> 2) - 1)
@@ -382,6 +382,7 @@ void BX_CPU_C::init_SMRAM(void)
   smram_map[SMRAM_FIELD_CR0] = SMRAM_TRANSLATE(0x7ffc);
   smram_map[SMRAM_FIELD_CR3] = SMRAM_TRANSLATE(0x7ff8);
   smram_map[SMRAM_FIELD_CR4] = SMRAM_TRANSLATE(0x7f14);
+  smram_map[SMRAM_FIELD_EFER] = SMRAM_TRANSLATE(0x7f10);
   smram_map[SMRAM_FIELD_IO_INSTRUCTION_RESTART] = SMRAM_TRANSLATE(0x7f00);
   smram_map[SMRAM_FIELD_AUTOHALT_RESTART] = SMRAM_TRANSLATE(0x7f00);
   smram_map[SMRAM_FIELD_NMI_MASK] = SMRAM_TRANSLATE(0x7f00);
@@ -569,12 +570,12 @@ bx_bool BX_CPU_C::smram_restore_state(const Bit32u *saved_state)
     return 0;
   }
 
-  if (temp_efer & ~BX_EFER_SUPPORTED_BITS) {
-    BX_PANIC(("SMM restore: Attemp to set EFER reserved bits: 0x%08x !", temp_efer));
+  if (temp_efer & ~((Bit64u) BX_CPU_THIS_PTR efer_suppmask)) {
+    BX_PANIC(("SMM restore: Attempt to set EFER reserved bits: 0x%08x !", temp_efer));
     return 0;
   }
 
-  BX_CPU_THIS_PTR efer.set32(temp_efer & BX_EFER_SUPPORTED_BITS);
+  BX_CPU_THIS_PTR efer.set32(temp_efer & BX_CPU_THIS_PTR efer_suppmask);
 
   if (BX_CPU_THIS_PTR efer.get_LMA()) {
     if (temp_eflags & EFlagsVMMask) {
@@ -657,11 +658,9 @@ bx_bool BX_CPU_C::smram_restore_state(const Bit32u *saved_state)
 
   handleCpuModeChange();
 
-#if BX_CPU_LEVEL >= 6
   handleSseModeChange();
 #if BX_SUPPORT_AVX
   handleAvxModeChange();
-#endif
 #endif
 
   Bit16u ar_data = SMRAM_FIELD(saved_state, SMRAM_FIELD_LDTR_SELECTOR_AR) >> 16;
@@ -697,6 +696,8 @@ bx_bool BX_CPU_C::smram_restore_state(const Bit32u *saved_state)
   if (SMM_REVISION_ID & SMM_SMBASE_RELOCATION)
      BX_CPU_THIS_PTR smbase = SMRAM_FIELD(saved_state, SMRAM_FIELD_SMBASE_OFFSET);
 
+  BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_CONTEXT_SWITCH, 0);
+
   return 1;
 }
 
@@ -717,11 +718,12 @@ void BX_CPU_C::smram_save_state(Bit32u *saved_state)
 
   SMRAM_FIELD(saved_state, SMRAM_FIELD_CR0) = BX_CPU_THIS_PTR cr0.get32();
   SMRAM_FIELD(saved_state, SMRAM_FIELD_CR3) = BX_CPU_THIS_PTR cr3;
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   SMRAM_FIELD(saved_state, SMRAM_FIELD_CR4) = BX_CPU_THIS_PTR cr4.get32();
+  SMRAM_FIELD(saved_state, SMRAM_FIELD_EFER) = BX_CPU_THIS_PTR efer.get32();
 #endif
-  SMRAM_FIELD(saved_state, SMRAM_FIELD_DR6) = BX_CPU_THIS_PTR dr6.get32();;
-  SMRAM_FIELD(saved_state, SMRAM_FIELD_DR7) = BX_CPU_THIS_PTR dr7.get32();;
+  SMRAM_FIELD(saved_state, SMRAM_FIELD_DR6) = BX_CPU_THIS_PTR dr6.get32();
+  SMRAM_FIELD(saved_state, SMRAM_FIELD_DR7) = BX_CPU_THIS_PTR dr7.get32();
 
   // --- Task Register --- //
   SMRAM_FIELD(saved_state, SMRAM_FIELD_TR_SELECTOR) = BX_CPU_THIS_PTR tr.selector.value;
@@ -764,7 +766,7 @@ bx_bool BX_CPU_C::smram_restore_state(const Bit32u *saved_state)
     return 0;
   }
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   Bit32u temp_cr4 = SMRAM_FIELD(saved_state, SMRAM_FIELD_CR4);
   if (! check_CR4(temp_cr4)) {
     BX_PANIC(("SMM restore: CR4 consistency check failed !"));
@@ -776,7 +778,7 @@ bx_bool BX_CPU_C::smram_restore_state(const Bit32u *saved_state)
     BX_PANIC(("SMM restore: failed to restore CR0 !"));
     return 0;
   }
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   if (!SetCR4(temp_cr4)) {
     BX_PANIC(("SMM restore: incorrect CR4 state !"));
     return 0;
@@ -796,6 +798,15 @@ bx_bool BX_CPU_C::smram_restore_state(const Bit32u *saved_state)
       return 0;
     }
   }
+#endif
+
+#if BX_CPU_LEVEL >= 5
+  Bit32u temp_efer = SMRAM_FIELD(saved_state, SMRAM_FIELD_EFER);
+  if (temp_efer & ~BX_CPU_THIS_PTR efer_suppmask) {
+    BX_ERROR(("SMM restore: Attempt to set EFER reserved bits: 0x%08x !", temp_efer));
+    return 0;
+  }
+  BX_CPU_THIS_PTR efer.set32(temp_efer & BX_CPU_THIS_PTR efer_suppmask);
 #endif
 
   Bit32u temp_eflags = SMRAM_FIELD(saved_state, SMRAM_FIELD_EFLAGS);

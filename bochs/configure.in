@@ -8,13 +8,13 @@ AC_CONFIG_HEADER(ltdlconf.h)
 
 dnl // Put Bochs version information right here so that it gets substituted
 dnl // into all the right places.
-VERSION="2.4.6.cvs"
-VER_STRING="2.4.6.cvs"
+VERSION="2.4.6.svn"
+VER_STRING="2.4.6.svn"
 dnl // WIN_VER_STRING format is "a, b, c, d"
 dnl // c should be > 90 for pre-release of next version otherwise patch level
-dnl // d should be 0 for release and 1 for cvs version
+dnl // d should be 0 for release and 1 for svn version
 WIN_VER_STRING="2, 4, 6, 1"
-REL_STRING="Build from CVS snapshot, after release 2.4.6"
+REL_STRING="Built from SVN snapshot, after release 2.4.6"
 
 changequote(<<, >>)
 changequote([, ])
@@ -37,10 +37,12 @@ fi
 # into the configure.in file, since people will want to be able to change
 # those settings by defining CFLAGS and CXXFLAGS before running configure.
 NO_LT=0
+MSVC_TARGET=0
 need_dlcompat_for_plugins=0
 case "$target" in
   *-pc-windows* | *-pc-winnt*)
     DEFAULT_GUI=win32                 # default to win32 gui
+    MSVC_TARGET=1
     ;;
   *-pc-cygwin* | *-pc-mingw32*)
     NO_LT=1   # do not use libtool at all on cygwin
@@ -51,8 +53,8 @@ case "$target" in
       ADD_FLAGS="-DBROKEN_LINKER=1"
     else
       # default case
-      ADD_FLAGS="-mno-cygwin -DWIN32"   # required for cygwin compile+win32 gui
-      DEFAULT_GUI=win32                 # default to win32 gui
+      ADD_FLAGS="-DWIN32"   # required for cygwin compile+win32 gui
+      DEFAULT_GUI=win32     # default to win32 gui
     fi
     ;;
   *-macosx* | *-darwin*)
@@ -62,10 +64,6 @@ case "$target" in
     ;;
   *-macos*)
     DEFAULT_GUI=macos                 # macos defaults to macos
-    ;;
-  *-beos*)
-    ADD_FLAGS="-Wno-multichar"
-    DEFAULT_GUI=beos                  # beos defaults to beos
     ;;
   *-amigaos* | *-morphos*)
     DEFAULT_GUI=amigaos               # amigaos or morphos defaults to amigaos gui
@@ -92,7 +90,6 @@ dnl // make sure X Windows is default if no other chosen
 if (test "$with_sdl" != yes) && \
    (test "$with_svga" != yes) && \
    (test "$with_x11" != yes) && \
-   (test "$with_beos" != yes) && \
    (test "$with_win32" != yes) && \
    (test "$with_nogui" != yes) && \
    (test "$with_term" != yes) && \
@@ -158,6 +155,25 @@ AC_CHECK_HEADER(sys/mman.h, AC_DEFINE(BX_HAVE_SYS_MMAN_H))
 AC_CHECK_FUNCS(timelocal, AC_DEFINE(BX_HAVE_TIMELOCAL))
 AC_CHECK_FUNCS(gmtime, AC_DEFINE(BX_HAVE_GMTIME))
 AC_CHECK_FUNCS(mktime, AC_DEFINE(BX_HAVE_MKTIME))
+
+AC_MSG_CHECKING(for __builtin_bswap32)
+AC_TRY_LINK([],[
+  __builtin_bswap32(0x12345678);
+],[
+  AC_DEFINE(BX_HAVE___BUILTIN_BSWAP32, 1, [Define to 1 if you have the '__builtin_bswap32' function.])
+  AC_MSG_RESULT(yes)
+],[
+  AC_MSG_RESULT(no)
+])
+AC_MSG_CHECKING(for __builtin_bswap64)
+AC_TRY_LINK([],[
+  __builtin_bswap64(0x12345678);
+],[
+  AC_DEFINE(BX_HAVE___BUILTIN_BSWAP64, 1, [Define to 1 if you have the '__builtin_bswap64' function.])
+  AC_MSG_RESULT(yes)
+],[
+  AC_MSG_RESULT(no)
+])
 
 dnl As of autoconf 2.53, the standard largefile test fails for Linux/gcc.
 dnl It does not put the largefiles arguments into CFLAGS, even though Linux/gcc
@@ -274,15 +290,6 @@ dnl Implement a check for each gui library to see if has a chance of compiling.
 if test "$with_all_libs" = yes; then
   if test "$cross_configure" = 1; then
     AC_MSG_WARN([[Using --with-all-libs while cross configuring is very unlikely to be what you want.  You should specify the --with-* args yourself.]])
-  fi
-  if test "$with_beos" != yes; then
-    can_compile_beos=1
-    AC_CHECK_HEADER([app/Application.h], [], [ can_compile_beos=0 ])
-    AC_CHECK_HEADER([interface/Window.h], [], [ can_compile_beos=0 ])
-    AC_CHECK_HEADER([interface/View.h], [], [ can_compile_beos=0 ])
-    if test $can_compile_beos = 1; then
-      with_beos=yes
-    fi
   fi
 
   if test "$with_amigaos" != yes; then
@@ -598,30 +605,26 @@ AC_ARG_ENABLE(long-phy-address,
     ]
   )
 
-
-AC_CHECK_HEADER(zlib.h, [AC_CHECK_LIB(z, gzopen, AC_DEFINE(BX_HAVE_ZLIB,1))] )
-
-AC_MSG_CHECKING(for compressed hard disk image support)
-AC_ARG_ENABLE(compressed-hd,
-  [  --enable-compressed-hd            allows compressed (zlib) hard disk image (not implemented yet)],
+AC_MSG_CHECKING(for large ramfile support)
+AC_ARG_ENABLE(large-ramfile,
+  [  --enable-large-ramfile                     enable large ramfile support],
   [if test "$enableval" = yes; then
     AC_MSG_RESULT(yes)
-    AC_DEFINE(BX_COMPRESSED_HD_SUPPORT, 1)
-    LIBS="$LIBS -lz"
+    AC_DEFINE(BX_LARGE_RAMFILE, 1)
    else
     AC_MSG_RESULT(no)
-    AC_DEFINE(BX_COMPRESSED_HD_SUPPORT, 0)
+    AC_DEFINE(BX_LARGE_RAMFILE, 0)
    fi],
   [
     AC_MSG_RESULT(no)
-    AC_DEFINE(BX_COMPRESSED_HD_SUPPORT, 0)
+    AC_DEFINE(BX_LARGE_RAMFILE, 0)
     ]
   )
-AC_SUBST(BX_COMPRESSED_HD_SUPPORT)
+AC_SUBST(BX_LARGE_RAMFILE)
 
 AC_MSG_CHECKING(for NE2000 support)
 AC_ARG_ENABLE(ne2000,
-  [  --enable-ne2000                   enable limited ne2000 support],
+  [  --enable-ne2000                   enable NE2000 support],
   [if test "$enableval" = yes; then
     AC_MSG_RESULT(yes)
     AC_DEFINE(BX_SUPPORT_NE2K, 1)
@@ -642,26 +645,9 @@ AC_ARG_ENABLE(ne2000,
   )
 AC_SUBST(NE2K_OBJS)
 
-AC_MSG_CHECKING(for ACPI support)
-AC_ARG_ENABLE(acpi,
-  [  --enable-acpi                     enable ACPI support],
-  [if test "$enableval" = yes; then
-    AC_MSG_RESULT(yes)
-    AC_DEFINE(BX_SUPPORT_ACPI, 1)
-   else
-    AC_MSG_RESULT(no)
-    AC_DEFINE(BX_SUPPORT_ACPI, 0)
-   fi],
-  [
-    AC_MSG_RESULT(no)
-    AC_DEFINE(BX_SUPPORT_ACPI, 0)
-    ]
-  )
-AC_SUBST(BX_SUPPORT_ACPI)
-
 AC_MSG_CHECKING(for i440FX PCI support)
 AC_ARG_ENABLE(pci,
-  [  --enable-pci                      enable limited i440FX PCI support],
+  [  --enable-pci                      enable i440FX PCI support],
   [if test "$enableval" = yes; then
     AC_MSG_RESULT(yes)
     AC_DEFINE(BX_SUPPORT_PCI, 1)
@@ -708,7 +694,7 @@ AC_ARG_ENABLE(pcidev,
 			KERNEL_MODULE_SUFFIX="ko"
 		;;
 		*)
-			AC_MSG_ERROR([Linux kernel 2.4 or 2.6 is required])
+                        AC_MSG_ERROR([Linux kernel 2.4 or 2.6 is required for PCI host device mapping])
 		;;
 	  esac
 	  KERNELDIR="/lib/modules/$linux_version/build"
@@ -742,9 +728,9 @@ AC_ARG_ENABLE(pcidev,
 )
 
 use_usb=0
-AC_MSG_CHECKING(for limited USB UHCI support)
+AC_MSG_CHECKING(for USB UHCI support)
 AC_ARG_ENABLE(usb,
-  [  --enable-usb                      enable limited USB UHCI support],
+  [  --enable-usb                      enable USB UHCI support],
   [if test "$enableval" = yes; then
     AC_MSG_RESULT(yes)
     AC_DEFINE(BX_SUPPORT_USB_UHCI, 1)
@@ -760,9 +746,9 @@ AC_ARG_ENABLE(usb,
     ]
   )
 
-AC_MSG_CHECKING(for limited USB OHCI support)
+AC_MSG_CHECKING(for USB OHCI support)
 AC_ARG_ENABLE(usb-ohci,
-  [  --enable-usb-ohci                 enable limited USB OHCI support],
+  [  --enable-usb-ohci                 enable USB OHCI support],
   [if test "$enableval" = yes; then
     AC_MSG_RESULT(yes)
     AC_DEFINE(BX_SUPPORT_USB_OHCI, 1)
@@ -775,6 +761,24 @@ AC_ARG_ENABLE(usb-ohci,
   [
     AC_MSG_RESULT(no)
     AC_DEFINE(BX_SUPPORT_USB_OHCI, 0)
+    ]
+  )
+
+AC_MSG_CHECKING(for experimental USB xHCI support)
+AC_ARG_ENABLE(usb-xhci,
+  [  --enable-usb-xhci                 enable experimental USB xHCI support],
+  [if test "$enableval" = yes; then
+    AC_MSG_RESULT(yes)
+    AC_DEFINE(BX_SUPPORT_USB_XHCI, 1)
+    PCI_OBJ="$PCI_OBJ usb_xhci.o"
+    use_usb=1
+   else
+    AC_MSG_RESULT(no)
+    AC_DEFINE(BX_SUPPORT_USB_XHCI, 0)
+   fi],
+  [
+    AC_MSG_RESULT(no)
+    AC_DEFINE(BX_SUPPORT_USB_XHCI, 0)
     ]
   )
 
@@ -807,21 +811,23 @@ AC_ARG_ENABLE(pnic,
 
 NETLOW_OBJS=''
 if test "$networking" = yes; then
-  NETLOW_OBJS='eth.o eth_null.o eth_vnet.o'
-  AC_CHECK_HEADER(net/bpf.h, [
-      NETLOW_OBJS="$NETLOW_OBJS eth_fbsd.o"
-      AC_DEFINE(BX_NETMOD_FBSD, 1)
-    ])
-  AC_CHECK_HEADER(netpacket/packet.h, [
-      NETLOW_OBJS="$NETLOW_OBJS eth_linux.o"
-      AC_DEFINE(BX_NETMOD_LINUX, 1)
-    ])
-  AC_CHECK_FUNCS(fork, have_fork=1)
-  AC_CHECK_FUNCS(execlp, have_execlp=1)
-  AC_CHECK_FUNCS(socketpair, have_socketpair=1)
-  if test x"$have_fork" = x1 -a x"$have_execlp" = x1 -a x"$have_socketpair" = x1; then
-    NETLOW_OBJS="$NETLOW_OBJS eth_slirp.o"
-    AC_DEFINE(BX_NETMOD_SLIRP, 1)
+  NETLOW_OBJS='eth_null.o eth_vnet.o'
+  if test "$MSVC_TARGET" != 1; then
+    AC_CHECK_HEADER(net/bpf.h, [
+        NETLOW_OBJS="$NETLOW_OBJS eth_fbsd.o"
+        AC_DEFINE(BX_NETMOD_FBSD, 1)
+      ])
+    AC_CHECK_HEADER(netpacket/packet.h, [
+        NETLOW_OBJS="$NETLOW_OBJS eth_linux.o"
+        AC_DEFINE(BX_NETMOD_LINUX, 1)
+      ])
+    AC_CHECK_FUNCS(fork, have_fork=1)
+    AC_CHECK_FUNCS(execlp, have_execlp=1)
+    AC_CHECK_FUNCS(socketpair, have_socketpair=1)
+    if test x"$have_fork" = x1 -a x"$have_execlp" = x1 -a x"$have_socketpair" = x1; then
+      NETLOW_OBJS="$NETLOW_OBJS eth_slirp.o"
+      AC_DEFINE(BX_NETMOD_SLIRP, 1)
+    fi
   fi
   case "$target" in
     *-pc-windows* | *-pc-winnt* | *-pc-cygwin* | *-pc-mingw32*)
@@ -884,22 +890,6 @@ fi
 
 AC_SUBST(NETLOW_OBJS)
 
-AC_MSG_CHECKING(for X2APIC support)
-AC_ARG_ENABLE(x2apic,
-  [  --enable-x2apic                   support for X2APIC],
-  [if test "$enableval" = yes; then
-    AC_MSG_RESULT(yes)
-    AC_DEFINE(BX_SUPPORT_X2APIC, 1)
-   else
-    AC_MSG_RESULT(no)
-    AC_DEFINE(BX_SUPPORT_X2APIC, 0)
-   fi],
-  [
-    AC_MSG_RESULT(no)
-    AC_DEFINE(BX_SUPPORT_X2APIC, 0)
-    ]
-  )
-
 AC_MSG_CHECKING(for repeated IO and mem copy speedups)
 AC_ARG_ENABLE(repeat-speedups,
   [  --enable-repeat-speedups          support repeated IO and mem copy speedups],
@@ -913,27 +903,6 @@ AC_ARG_ENABLE(repeat-speedups,
   [
     AC_MSG_RESULT(no)
     speedup_repeat=0
-    ]
-  )
-
-AC_MSG_CHECKING(for instruction trace cache support)
-AC_ARG_ENABLE(trace-cache,
-  [  --enable-trace-cache              support instruction trace cache],
-  [if test "$enableval" = yes; then
-    AC_MSG_RESULT(yes)
-    speedup_TraceCache=1
-   else
-    AC_MSG_RESULT(no)
-    speedup_TraceCache=0
-   fi],
-  [
-    if test "$speedup_TraceCache " = 1; then
-      AC_MSG_RESULT(yes)
-      speedup_TraceCache=1
-    else
-      AC_MSG_RESULT(no)
-      speedup_TraceCache=0
-    fi
     ]
   )
 
@@ -953,19 +922,19 @@ AC_ARG_ENABLE(fast-function-calls,
     ]
   )
 
-AC_MSG_CHECKING(for host specific inline assembly accelerations)
-AC_ARG_ENABLE(host-specific-asms,
-  [  --enable-host-specific-asms       support for host specific inline assembly],
+AC_MSG_CHECKING(for handlers chaining speedups)
+AC_ARG_ENABLE(handlers-chaining,
+  [  --enable-handlers-chaining        support handlers-chaining emulation speedups],
   [if test "$enableval" = yes; then
     AC_MSG_RESULT(yes)
-    speedup_host_specific_asms=1
+    speedup_handlers_chaining=1
    else
     AC_MSG_RESULT(no)
-    speedup_host_specific_asms=0
+    speedup_handlers_chaining=0
    fi],
   [
     AC_MSG_RESULT(no)
-    speedup_host_specific_asms=0
+    speedup_handlers_chaining=0
     ]
   )
 
@@ -1001,8 +970,8 @@ AC_ARG_ENABLE(show-ips,
     AC_DEFINE(BX_SHOW_IPS, 0)
    fi],
   [
-    AC_MSG_RESULT(no)
-    AC_DEFINE(BX_SHOW_IPS, 0)
+    AC_MSG_RESULT(yes)
+    AC_DEFINE(BX_SHOW_IPS, 1)
     ]
   )
 
@@ -1142,20 +1111,14 @@ AC_ARG_ENABLE(all-optimizations,
 if test "$speedups_all" = 1; then
   # Configure requested to force all options enabled.
   speedup_repeat=1
-  speedup_TraceCache=1
   speedup_fastcall=1
+  speedup_handlers_chaining=1
 fi
 
 if test "$speedup_repeat" = 1; then
-  AC_DEFINE(BX_SupportRepeatSpeedups, 1)
+  AC_DEFINE(BX_SUPPORT_REPEAT_SPEEDUPS, 1)
 else
-  AC_DEFINE(BX_SupportRepeatSpeedups, 0)
-fi
-
-if test "$speedup_host_specific_asms" = 1; then
-  AC_DEFINE(BX_SupportHostAsms, 1)
-else
-  AC_DEFINE(BX_SupportHostAsms, 0)
+  AC_DEFINE(BX_SUPPORT_REPEAT_SPEEDUPS, 0)
 fi
 
 if test "$speedup_fastcall" = 1; then
@@ -1164,10 +1127,20 @@ else
   AC_DEFINE(BX_FAST_FUNC_CALL, 0)
 fi
 
-if test "$speedup_TraceCache" = 1; then
-  AC_DEFINE(BX_SUPPORT_TRACE_CACHE, 1)
+if test "$use_smp" = 1 -a "$speedup_handlers_chaining" = 1; then
+  speedup_handlers_chaining=0
+  echo "ERROR: with >1 processor handlers-chaining speedups are not supported yet"
+fi
+
+if test "$bx_debugger" = 1 -a "$speedup_handlers_chaining" = 1; then
+  speedup_handlers_chaining=0
+  echo "ERROR: handlers-chaining speedups are not supported with internal debugger yet"
+fi
+
+if test "$speedup_handlers_chaining" = 1; then
+  AC_DEFINE(BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS, 1)
 else
-  AC_DEFINE(BX_SUPPORT_TRACE_CACHE, 0)
+  AC_DEFINE(BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS, 0)
 fi
 
 
@@ -1491,8 +1464,13 @@ AC_ARG_ENABLE(monitor_mwait,
    fi
    ],
   [
-    AC_MSG_RESULT(no)
-    AC_DEFINE(BX_SUPPORT_MONITOR_MWAIT, 0)
+    if test "$bx_cpu_level" -gt 5; then
+      AC_MSG_RESULT(yes)
+      AC_DEFINE(BX_SUPPORT_MONITOR_MWAIT, 1)
+    else
+      AC_MSG_RESULT(no)
+      AC_DEFINE(BX_SUPPORT_MONITOR_MWAIT, 0)
+    fi
   ]
   )
 
@@ -1515,8 +1493,8 @@ AC_ARG_ENABLE(avx,
   ]
   )
 
-if test "$support_avx" -gt 0 -a "$bx_cpu_level" -lt 6; then
-  AC_MSG_ERROR([for AVX support the CPU level must be set to 6])
+if test "$support_avx" -gt 0 -a "$use_x86_64" = 0; then
+  AC_MSG_ERROR([for AVX support x86-64 emulation must be compiled in!])
 fi
 
 AC_MSG_CHECKING(for x86 debugger support)
@@ -1563,11 +1541,6 @@ if test "$bx_cdrom" = 1; then
       CDROM_OBJS="cdrom.o"
       EXTRA_LINK_OPTS="${EXTRA_LINK_OPTS} -framework IOKit -framework CoreFoundation "'$(GUI_LINK_OPTS)'
     fi
-    case $target in
-      *-beos*)
-	# use the beos cdrom file instead
-	CDROM_OBJS="$CDROM_OBJS cdrom_beos.o"
-    esac
     AC_DEFINE(BX_SUPPORT_CDROM, 1)
 else
     AC_MSG_RESULT(no)
@@ -1658,10 +1631,10 @@ if test "$soundcard_present" = 1; then
       DEVICE_LINK_OPTS="$DEVICE_LINK_OPTS -lwinmm"
       AC_MSG_RESULT(win)
       ;;
-    *-macosx* | *-macos*)
+    *-macosx* | *-macos* | *-apple-darwin*)
       SOUNDLOW_OBJS='soundosx.o'
       AC_DEFINE(BX_SOUND_LOWLEVEL_C, bx_sound_osx_c)
-      DEVICE_LINK_OPTS="$DEVICE_LINK_OPTS -framework AudioUnit -framework AudioToolbox"
+      DEVICE_LINK_OPTS="$DEVICE_LINK_OPTS -framework CoreServices -framework AudioUnit -framework AudioToolbox"
       AC_MSG_RESULT(osx)
       ;;
     *)
@@ -1806,10 +1779,6 @@ AC_SUBST(RC_CMD)
 
 AC_ARG_WITH(x11,
   [  --with-x11                        use X11 GUI],
-  )
-
-AC_ARG_WITH(beos,
-  [  --with-beos                       use BeOS GUI],
   )
 
 AC_ARG_WITH(win32,
@@ -1992,13 +1961,6 @@ if test "$with_x11" = yes; then
   fi
 fi
 AC_SUBST(XPM_LIB)
-
-if test "$with_beos" = yes; then
-  display_libs="$display_libs beos"
-  AC_DEFINE(BX_WITH_BEOS, 1)
-  SPECIFIC_GUI_OBJS="$SPECIFIC_GUI_OBJS \$(GUI_OBJS_BEOS)"
-  GUI_LINK_OPTS="$GUI_LINK_OPTS \$(GUI_LINK_OPTS_BEOS)"
-fi
 
 if test "$with_sdl" = yes; then
   display_libs="$display_libs sdl"
@@ -2237,7 +2199,11 @@ case "$target" in
     CXX="$CC"
     #C_OPT="/Zi"   # for debugging
     C_OPT="/Ox"   # optimize for speed
-    CFLAGS="/nologo /MT /W3 /EHs-c- /DNDEBUG /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS $C_OPT"
+    if test "$bx_plugins" = 1; then
+      CFLAGS="/nologo /MD /W3 /EHs-c- /DNDEBUG /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS $C_OPT"
+    else
+      CFLAGS="/nologo /MT /W3 /EHs-c- /DNDEBUG /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS $C_OPT"
+    fi
     CXXFLAGS="$CFLAGS"
     DASH="/"
     SLASH="\\"
@@ -2284,6 +2250,8 @@ case "$target" in
     AC_DEFINE(BX_NETMOD_TAP, 0)
     AC_DEFINE(BX_HAVE_SELECT, 1)
     AC_DEFINE(BX_HAVE_SOCKLEN_T, 0)
+    AC_DEFINE(BX_HAVE___BUILTIN_BSWAP32, 0)
+    AC_DEFINE(BX_HAVE___BUILTIN_BSWAP64, 0)
     ;;
   *-pc-cygwin*)
     EXE=".exe"
@@ -2301,9 +2269,6 @@ case "$target" in
     fi
     AC_DEFINE(BX_HAVE_SELECT, 1)
     ;;
-  *-beos*)
-    PRIMARY_TARGET=.bochs_beos_target
-    ;;
 esac
 
 ENH_DBG_OBJS=""
@@ -2319,7 +2284,22 @@ AC_SUBST(ENH_DBG_OBJS)
 DIALOG_OBJS=""
 EXPORT_DYNAMIC="-export-dynamic"
 case $target in
-  *-pc-windows* | *-pc-winnt* | *-cygwin* | *-mingw*)
+  *-pc-windows* | *-pc-winnt*)
+    if test "$bx_plugins" = 1; then
+      # set variables for building DLL plugins
+      PLUGIN_VAR=""
+      PLUGIN_LIBNAME_TRANSFORMATION='%.o=bx_%.dll'
+      INSTALL_PLUGINS_VAR=install_dll_plugins
+      LIBS="$LIBS advapi32.lib comctl32.lib comdlg32.lib gdi32.lib shell32.lib user32.lib"
+    else
+      if test "$with_win32" != yes; then
+        LIBS="$LIBS comctl32.lib"
+      fi
+    fi
+    DIALOG_OBJS="win32dialog.o win32paramdlg.o"
+    EXPORT_DYNAMIC=""
+    ;;
+  *-cygwin* | *-mingw*)
     if test "$bx_plugins" = 1; then
       AC_CHECK_LIB(mingwex, opendir, LIBS="$LIBS -lmingwex")
       # set variables for building DLL plugins
@@ -2700,6 +2680,16 @@ AC_ARG_ENABLE(apic,
    AC_MSG_RESULT(no)
   ])
 
+AC_MSG_CHECKING(for X2APIC support (deprecated))
+AC_ARG_ENABLE(x2apic,
+  [  --enable-x2apic                   enable X2APIC support (deprecated)],
+  [AC_MSG_RESULT($enableval)
+   AC_MSG_ERROR([DEPRECATED - moved to .bochsrc options])
+  ],
+  [
+   AC_MSG_RESULT(no)
+  ])
+
 AC_MSG_CHECKING(whether to ignore bad MSR references (deprecated))
 AC_ARG_ENABLE(ignore-bad-msr,
   [  --enable-ignore-bad-msr           ignore bad MSR references (deprecated)],
@@ -2720,67 +2710,6 @@ AC_ARG_ENABLE(1g-pages,
    AC_MSG_RESULT(no)
   ])
 
-AC_MSG_CHECKING(for PAE support (deprecated))
-AC_ARG_ENABLE(pae,
-  [  --enable-pae                      enables PAE support (deprecated)],
-  [AC_MSG_RESULT($enableval)
-   AC_MSG_ERROR([DEPRECATED - enabled automatically for CPU_LEVEL >= 6])
-  ],
-  [
-   AC_MSG_RESULT(no)
-  ])
-
-AC_MSG_CHECKING(for MTRR/PAT support (deprecated))
-AC_ARG_ENABLE(mtrr,
-  [  --enable-mtrr                     enables MTRR/PAT support (deprecated)],
-  [AC_MSG_RESULT($enableval)
-   AC_MSG_ERROR([DEPRECATED - enabled automatically for CPU_LEVEL >= 6])
-  ],
-  [
-   AC_MSG_RESULT(no)
-  ])
-
-
-AC_MSG_CHECKING(for LARGE PAGES (PSE) support (deprecated))
-AC_ARG_ENABLE(large-pages,
-  [  --enable-large-pages              enables PSE support (deprecated)],
-  [AC_MSG_RESULT($enableval)
-   AC_MSG_ERROR([DEPRECATED - enabled automatically for CPU_LEVEL >= 5])
-  ],
-  [
-   AC_MSG_RESULT(no)
-  ])
-
-AC_MSG_CHECKING(for GLOBAL PAGES (PGE) support (deprecated))
-AC_ARG_ENABLE(global-pages,
-  [  --enable-global-pages             enables Global Pages support (deprecated)],
-  [AC_MSG_RESULT($enableval)
-   AC_MSG_ERROR([DEPRECATED - enabled automatically for CPU_LEVEL >= 6])
-  ],
-  [
-   AC_MSG_RESULT(no)
-  ])
-
-AC_MSG_CHECKING(for DAZ support (deprecated))
-AC_ARG_ENABLE(daz,
-  [  --enable-daz                      enables denormals-are-zeroes support (deprecated)],
-  [AC_MSG_RESULT($enableval)
-   AC_MSG_ERROR([DEPRECATED - enabled automatically for SSE level >= 2])
-  ],
-  [
-   AC_MSG_RESULT(no)
-  ])
-
-AC_MSG_CHECKING(for VME support (deprecated))
-AC_ARG_ENABLE(vme,
-  [  --enable-vme                      virtual 8086 mode extensions (deprecated)],
-  [AC_MSG_RESULT($enableval)
-   AC_MSG_ERROR([DEPRECATED - enabled automatically for CPU_LEVEL >= 5])
-  ],
-  [
-   AC_MSG_RESULT(no)
-  ])
-
 AC_MSG_CHECKING(for VESA BIOS extensions (deprecated))
 AC_ARG_ENABLE(vbe,
   [  --enable-vbe                      use VESA BIOS extensions (deprecated)],
@@ -2791,6 +2720,25 @@ AC_ARG_ENABLE(vbe,
    AC_MSG_RESULT(no)
   ])
 
+AC_MSG_CHECKING(for ACPI extensions support (deprecated))
+AC_ARG_ENABLE(acpi,
+  [  --enable-acpi                     use ACPI extensions support (deprecated)],
+  [AC_MSG_RESULT($enableval)
+   AC_MSG_ERROR([DEPRECATED - this feature enabled with PCI configure option and could be turned on through .bochsrc option])
+  ],
+  [
+   AC_MSG_RESULT(no)
+  ])
+
+AC_MSG_CHECKING(for instruction trace cache support)
+AC_ARG_ENABLE(trace-cache,
+  [  --enable-trace-cache              support instruction trace cache (deprecated)],
+  [AC_MSG_RESULT($enableval)
+   AC_MSG_ERROR([DEPRECATED - this feature will be enabled in all configurations])
+  ],
+  [
+   AC_MSG_RESULT(no)
+  ])
 
 # Create some subdirectories for when you run configure from some other
 # directory.
@@ -2842,7 +2790,7 @@ AC_PATH_PROG(GZIP, gzip)
 AC_PATH_PROG(TAR, tar)
 
 AC_OUTPUT(Makefile iodev/Makefile bx_debug/Makefile bios/Makefile \
-	 cpu/Makefile memory/Makefile gui/Makefile \
+	 cpu/Makefile cpu/cpudb/Makefile memory/Makefile gui/Makefile \
 	 disasm/Makefile ${INSTRUMENT_DIR}/Makefile misc/Makefile \
 	 fpu/Makefile doc/docbook/Makefile \
 	 build/linux/bochs-dlx \

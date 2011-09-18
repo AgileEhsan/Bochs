@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2002-2009  The Bochs Project
+//  Copyright (C) 2002-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -42,11 +42,16 @@
 #define BX_MT_LBUTTON           0x20
 #define BX_MT_RBUTTON           0x40
 
-#define BX_GUI_MT_CTRL_MB       0x11
-#define BX_GUI_MT_CTRL_LRB      0x61
-#define BX_GUI_MT_CTRL_F10      0x05
-#define BX_GUI_MT_F12           0x08
-#define BX_GUI_MT_CTRL_ALT      0x03
+#define BX_GUI_MT_CTRL_MB       (BX_MT_KEY_CTRL | BX_MT_MBUTTON)
+#define BX_GUI_MT_CTRL_LRB      (BX_MT_KEY_CTRL | BX_MT_LBUTTON | BX_MT_RBUTTON)
+#define BX_GUI_MT_CTRL_F10      (BX_MT_KEY_CTRL | BX_MT_KEY_F10)
+#define BX_GUI_MT_F12           (BX_MT_KEY_F12)
+#define BX_GUI_MT_CTRL_ALT      (BX_MT_KEY_CTRL | BX_MT_KEY_ALT)
+
+// snapshot feature
+#define BX_GUI_SNAPSHOT_UNSUP   0
+#define BX_GUI_SNAPSHOT_TXT     1
+#define BX_GUI_SNAPSHOT_GFX     2
 
 typedef struct {
   Bit16u  start_address;
@@ -84,7 +89,7 @@ public:
   bx_gui_c (void);
   virtual ~bx_gui_c ();
   // Define the following functions in the module for your particular GUI
-  // (x.cc, beos.cc, ...)
+  // (x.cc, win32.cc, ...)
   virtual void specific_init(int argc, char **argv,
                  unsigned x_tilesize, unsigned y_tilesize, unsigned header_bar_y) = 0;
   virtual void text_update(Bit8u *old_text, Bit8u *new_text,
@@ -152,26 +157,25 @@ public:
 
 protected:
   // And these are defined and used privately in gui.cc
-  static Bit32s make_text_snapshot (char **snapshot, Bit32u *length);
+  static void make_text_snapshot (char **snapshot, Bit32u *length);
   static void floppyA_handler(void);
   static void floppyB_handler(void);
-  static void cdromD_handler(void);
+  static void cdrom1_handler(void);
   static void reset_handler(void);
   static void power_handler(void);
   static void copy_handler(void);
   static void paste_handler(void);
   static void snapshot_handler(void);
-  static void snapshot_checker(void *);
   static void config_handler(void);
   static void userbutton_handler(void);
   static void save_restore_handler(void);
 
   bx_bool floppyA_status;
   bx_bool floppyB_status;
-  bx_bool cdromD_status;
+  bx_bool cdrom1_status;
   unsigned floppyA_bmap_id, floppyA_eject_bmap_id, floppyA_hbar_id;
   unsigned floppyB_bmap_id, floppyB_eject_bmap_id, floppyB_hbar_id;
-  unsigned cdromD_bmap_id, cdromD_eject_bmap_id, cdromD_hbar_id;
+  unsigned cdrom1_bmap_id, cdrom1_eject_bmap_id, cdrom1_hbar_id;
   unsigned power_bmap_id,    power_hbar_id;
   unsigned reset_bmap_id,    reset_hbar_id;
   unsigned copy_bmap_id, copy_hbar_id;

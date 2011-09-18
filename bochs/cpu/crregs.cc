@@ -26,13 +26,14 @@
 #include "cpu.h"
 #define LOG_THIS BX_CPU_THIS_PTR
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DdRd(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DdRd(bxInstruction_c *i)
 {
 #if BX_SUPPORT_VMX
-  VMexit_DR_Access(i, 0 /* write */);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_DR_Access(i, 0 /* write */);
 #endif
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   if (BX_CPU_THIS_PTR cr4.get_DE()) {
     if ((i->nnn() & 0xE) == 4) {
       BX_ERROR(("MOV_DdRd: access to DR4/DR5 causes #UD"));
@@ -49,7 +50,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DdRd(bxInstruction_c *i)
     exception(BX_DB_EXCEPTION, 0);
   }
 
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_DdRd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -69,8 +71,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DdRd(bxInstruction_c *i)
     case 1: // DR1
     case 2: // DR2
     case 3: // DR3
-      TLB_invlpg(val_32);
       BX_CPU_THIS_PTR dr[i->nnn()] = val_32;
+      TLB_invlpg(val_32);
       break;
 
     case 4: // DR4
@@ -96,15 +98,6 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DdRd(bxInstruction_c *i)
       // data breakpoint matching does not occur unless it is enabled
       // by setting the LE and/or GE flags.
 
-      // Some sanity checks...
-      if (((((val_32>>16) & 3)==0) && (((val_32>>18) & 3)!=0)) ||
-          ((((val_32>>20) & 3)==0) && (((val_32>>22) & 3)!=0)) ||
-          ((((val_32>>24) & 3)==0) && (((val_32>>26) & 3)!=0)) ||
-          ((((val_32>>28) & 3)==0) && (((val_32>>30) & 3)!=0)))
-      {
-        // Instruction breakpoint with LENx not 00b (1-byte length)
-        BX_ERROR(("MOV_DdRd: write of %08x, R/W=00b LEN!=00b", val_32));
-      }
 #if BX_CPU_LEVEL <= 4
       // 386/486: you can play with all the bits except b10 is always 1
       BX_CPU_THIS_PTR dr7.set32(val_32 | 0x00000400);
@@ -114,36 +107,38 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DdRd(bxInstruction_c *i)
       BX_CPU_THIS_PTR dr7.set32((val_32 & 0xffff2fff) | 0x00000400);
 #endif
 #if BX_X86_DEBUGGER
-      // if we have code breakpoints enabled then we must check
-      // breakpoints condition in cpu loop
-      if (BX_CPU_THIS_PTR dr7.get_bp_enabled()) {
-        if (BX_CPU_THIS_PTR dr7.get_R_W0() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W1() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W2() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W3() == 0) 
-        {
-          BX_INFO(("MOV_DdRd(): code breakpoint is set"));
-          BX_CPU_THIS_PTR async_event = 1;
-        }
+      // Some sanity checks...
+      if ((BX_CPU_THIS_PTR dr7.get_R_W0() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN0()) ||
+          (BX_CPU_THIS_PTR dr7.get_R_W1() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN1()) ||
+          (BX_CPU_THIS_PTR dr7.get_R_W2() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN2()) ||
+          (BX_CPU_THIS_PTR dr7.get_R_W3() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN3()))
+      {
+        // Instruction breakpoint with LENx not 00b (1-byte length)
+        BX_ERROR(("MOV_DdRd: write of %08x, R/W=00b LEN!=00b", val_32));
       }
 #endif
+
+      TLB_flush(); // the DR7 write could enable some breakpoints
       break;
 
     default:
       BX_ERROR(("MOV_DdRd: #UD - register index out of range"));
       exception(BX_UD_EXCEPTION, 0);
   }
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdDd(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdDd(bxInstruction_c *i)
 {
   Bit32u val_32;
 
 #if BX_SUPPORT_VMX
-  VMexit_DR_Access(i, 1 /* read */);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_DR_Access(i, 1 /* read */);
 #endif
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   if (BX_CPU_THIS_PTR cr4.get_DE()) {
     if ((i->nnn() & 0xE) == 4) {
       BX_ERROR(("MOV_RdDd: access to DR4/DR5 causes #UD"));
@@ -160,7 +155,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdDd(bxInstruction_c *i)
     exception(BX_DB_EXCEPTION, 0);
   }
 
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_RdDd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -199,13 +195,16 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdDd(bxInstruction_c *i)
   }
 
   BX_WRITE_32BIT_REGZ(i->rm(), val_32);
+
+  BX_NEXT_INSTR(i);
 }
 
 #if BX_SUPPORT_X86_64
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DqRq(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DqRq(bxInstruction_c *i)
 {
 #if BX_SUPPORT_VMX
-  VMexit_DR_Access(i, 0 /* write */);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_DR_Access(i, 0 /* write */);
 #endif
 
   if (BX_CPU_THIS_PTR cr4.get_DE()) {
@@ -249,8 +248,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DqRq(bxInstruction_c *i)
     case 1: // DR1
     case 2: // DR2
     case 3: // DR3
-      TLB_invlpg(val_64);
       BX_CPU_THIS_PTR dr[i->nnn()] = val_64;
+      TLB_invlpg(val_64);
       break;
 
     case 4: // DR4
@@ -279,49 +278,39 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_DqRq(bxInstruction_c *i)
         exception(BX_GP_EXCEPTION, 0);
       }
 
-      // Some sanity checks...
-      if (((((val_64>>16) & 3)==0) && (((val_64>>18) & 3)!=0)) ||
-          ((((val_64>>20) & 3)==0) && (((val_64>>22) & 3)!=0)) ||
-          ((((val_64>>24) & 3)==0) && (((val_64>>26) & 3)!=0)) ||
-          ((((val_64>>28) & 3)==0) && (((val_64>>30) & 3)!=0)))
-      {
-        // Instruction breakpoint with LENx not 00b (1-byte length)
-        BX_ERROR(("MOV_DqRq: write of %08x:%08x, R/W=00b LEN!=00b",
-          (Bit32u)(val_64 >> 32), (Bit32u)(val_64 & 0xFFFFFFFF)));
-      }
-
       // Pentium+: bits15,14,12 are hardwired to 0, rest are settable.
       // Even bits 11,10 are changeable though reserved.
       BX_CPU_THIS_PTR dr7.set32((val_64 & 0xffff2fff) | 0x00000400);
 
 #if BX_X86_DEBUGGER
-      // if we have code breakpoints enabled then we must check
-      // breakpoints condition in cpu loop
-      if (BX_CPU_THIS_PTR dr7.get_bp_enabled()) {
-        if (BX_CPU_THIS_PTR dr7.get_R_W0() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W1() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W2() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W3() == 0) 
-        {
-          BX_INFO(("MOV_DdRd(): code breakpoint is set"));
-          BX_CPU_THIS_PTR async_event = 1;
-        }
+      if ((BX_CPU_THIS_PTR dr7.get_R_W0() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN0()) ||
+          (BX_CPU_THIS_PTR dr7.get_R_W1() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN1()) ||
+          (BX_CPU_THIS_PTR dr7.get_R_W2() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN2()) ||
+          (BX_CPU_THIS_PTR dr7.get_R_W3() == BX_HWDebugInstruction && BX_CPU_THIS_PTR dr7.get_LEN3()))
+      {
+        // Instruction breakpoint with LENx not 00b (1-byte length)
+        BX_ERROR(("MOV_DqRq: write of %08x, R/W=00b LEN!=00b", BX_CPU_THIS_PTR dr7.get32()));
       }
 #endif
+
+      TLB_flush(); // the DR7 write could enable some breakpoints
       break;
 
     default:
       BX_ERROR(("MOV_DqRq: #UD - register index out of range"));
       exception(BX_UD_EXCEPTION, 0);
   }
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqDq(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqDq(bxInstruction_c *i)
 {
   Bit64u val_64;
 
 #if BX_SUPPORT_VMX
-  VMexit_DR_Access(i, 1 /* read */);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_DR_Access(i, 1 /* read */);
 #endif
 
   if (BX_CPU_THIS_PTR cr4.get_DE()) {
@@ -384,12 +373,15 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqDq(bxInstruction_c *i)
   }
 
   BX_WRITE_64BIT_REG(i->rm(), val_64);
+
+  BX_NEXT_INSTR(i);
 }
 #endif // #if BX_SUPPORT_X86_64
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR0Rd(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR0Rd(bxInstruction_c *i)
 {
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_CR0Rd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -398,26 +390,44 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR0Rd(bxInstruction_c *i)
 
   Bit32u val_32 = BX_READ_32BIT_REG(i->rm());
 
+  if (i->nnn() == 0) {
+    // CR0
 #if BX_SUPPORT_VMX
-  val_32 = VMexit_CR0_Write(i, val_32);
+    if (BX_CPU_THIS_PTR in_vmx_guest)
+      val_32 = (Bit32u) VMexit_CR0_Write(i, val_32);
 #endif
-  if (! SetCR0(val_32))
-    exception(BX_GP_EXCEPTION, 0);
+    if (! SetCR0(val_32))
+      exception(BX_GP_EXCEPTION, 0);
+
+    BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_MOV_CR0, val_32);
+  }
+#if BX_CPU_LEVEL >= 6
+  else {
+    // AMD feature: LOCK CR0 allows CR8 access even in 32-bit mode
+    WriteCR8(i, val_32);
+  }
+#endif
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR2Rd(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR2Rd(bxInstruction_c *i)
 {
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_CR2Rd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
 
   BX_CPU_THIS_PTR cr2 = BX_READ_32BIT_REG(i->rm());
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rd(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rd(bxInstruction_c *i)
 {
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_CR3Rd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -427,7 +437,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rd(bxInstruction_c *i)
   Bit32u val_32 = BX_READ_32BIT_REG(i->rm());
 
 #if BX_SUPPORT_VMX
-  VMexit_CR3_Write(i, val_32);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_CR3_Write(i, val_32);
 #endif
 
 #if BX_CPU_LEVEL >= 6
@@ -443,12 +454,15 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rd(bxInstruction_c *i)
     exception(BX_GP_EXCEPTION, 0);
 
   BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_MOV_CR3, val_32);
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR4Rd(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR4Rd(bxInstruction_c *i)
 {
-#if BX_CPU_LEVEL >= 4
-  if (!real_mode() && CPL!=0) {
+#if BX_CPU_LEVEL >= 5
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_CR4Rd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -456,57 +470,83 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR4Rd(bxInstruction_c *i)
   invalidate_prefetch_q();
 
   Bit32u val_32 = BX_READ_32BIT_REG(i->rm());
-
 #if BX_SUPPORT_VMX
-  val_32 = VMexit_CR4_Write(i, val_32);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    val_32 = (Bit32u) VMexit_CR4_Write(i, val_32);
 #endif
   if (! SetCR4(val_32))
     exception(BX_GP_EXCEPTION, 0);
+
+  BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_MOV_CR4, val_32);
 #endif
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR0(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR0(bxInstruction_c *i)
 {
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_RdCR0: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
 
-  Bit32u val_32 = (Bit32u) read_CR0(); /* correctly handle VMX */
+  Bit32u val_32 = 0;
+
+  if (i->nnn() == 0) {
+    // CR0
+    val_32 = (Bit32u) read_CR0(); /* correctly handle VMX */
+  }
+#if BX_CPU_LEVEL >= 6
+  else {
+    // AMD feature: LOCK CR0 allows CR8 access even in 32-bit mode
+    val_32 = ReadCR8(i);
+  }
+#endif
 
   BX_WRITE_32BIT_REGZ(i->rm(), val_32);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR2(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR2(bxInstruction_c *i)
 {
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_RdCd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
 
   BX_WRITE_32BIT_REGZ(i->rm(), (Bit32u) BX_CPU_THIS_PTR cr2);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR3(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR3(bxInstruction_c *i)
 {
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_RdCd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
 
 #if BX_SUPPORT_VMX
-  VMexit_CR3_Read(i);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_CR3_Read(i);
 #endif
 
   Bit32u val_32 = (Bit32u) BX_CPU_THIS_PTR cr3;
 
   BX_WRITE_32BIT_REGZ(i->rm(), val_32);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR4(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR4(bxInstruction_c *i)
 {
-#if BX_CPU_LEVEL >= 4
-  if (!real_mode() && CPL!=0) {
+#if BX_CPU_LEVEL >= 5
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("MOV_RdCd: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -515,10 +555,12 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdCR4(bxInstruction_c *i)
 
   BX_WRITE_32BIT_REGZ(i->rm(), val_32);
 #endif
+
+  BX_NEXT_INSTR(i);
 }
 
 #if BX_SUPPORT_X86_64
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR0Rq(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR0Rq(bxInstruction_c *i)
 {
   if (CPL!=0) {
     BX_ERROR(("MOV_CR0Rq: #GP(0) if CPL is not 0"));
@@ -532,42 +574,22 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR0Rq(bxInstruction_c *i)
   if (i->nnn() == 0) {
     // CR0
 #if BX_SUPPORT_VMX
-    val_64 = VMexit_CR0_Write(i, val_64);
+    if (BX_CPU_THIS_PTR in_vmx_guest)
+      val_64 = VMexit_CR0_Write(i, val_64);
 #endif
     if (! SetCR0(val_64))
       exception(BX_GP_EXCEPTION, 0);
+
+    BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_MOV_CR0, (Bit32u) val_64);
   }
   else {
-    // CR8
-#if BX_SUPPORT_VMX
-    VMexit_CR8_Write(i);
-#endif
-
-    // CR8 is aliased to APIC->TASK PRIORITY register
-    //   APIC.TPR[7:4] = CR8[3:0]
-    //   APIC.TPR[3:0] = 0
-    // Reads of CR8 return zero extended APIC.TPR[7:4]
-    // Write to CR8 update APIC.TPR[7:4]
-#if BX_SUPPORT_APIC
-    if (val_64 & BX_CONST64(0xfffffffffffffff0)) {
-      BX_ERROR(("MOV_CqRq: Attempt to set reserved bits of CR8"));
-      exception(BX_GP_EXCEPTION, 0);
-    }
-
-#if BX_SUPPORT_VMX
-    if (BX_CPU_THIS_PTR in_vmx_guest && VMEXIT(VMX_VM_EXEC_CTRL2_TPR_SHADOW)) {
-      VMX_Write_VTPR((val_64 & 0xF) << 4);
-    }
-#endif
-    else
-    {
-      BX_CPU_THIS_PTR lapic.set_tpr((val_64 & 0xF) << 4);
-    }
-#endif
+    WriteCR8(i, val_64);
   }
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR2Rq(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR2Rq(bxInstruction_c *i)
 {
   if (i->nnn() != 2) {
     BX_ERROR(("MOV_CR2Rq: #UD - register index out of range"));
@@ -580,9 +602,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR2Rq(bxInstruction_c *i)
   }
 
   BX_CPU_THIS_PTR cr2 = BX_READ_64BIT_REG(i->rm());
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rq(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rq(bxInstruction_c *i)
 {
   if (i->nnn() != 3) {
     BX_ERROR(("MOV_CR3Rq: #UD - register index out of range"));
@@ -599,7 +623,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rq(bxInstruction_c *i)
   Bit64u val_64 = BX_READ_64BIT_REG(i->rm());
 
 #if BX_SUPPORT_VMX
-  VMexit_CR3_Write(i, val_64);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_CR3_Write(i, val_64);
 #endif
 
   // no PDPTR checks in long mode
@@ -607,9 +632,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR3Rq(bxInstruction_c *i)
     exception(BX_GP_EXCEPTION, 0);
 
   BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_MOV_CR3, val_64);
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR4Rq(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR4Rq(bxInstruction_c *i)
 {
   if (i->nnn() != 4) {
     BX_ERROR(("MOV_CR4Rq: #UD - register index out of range"));
@@ -624,24 +651,27 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_CR4Rq(bxInstruction_c *i)
   invalidate_prefetch_q();
 
   Bit64u val_64 = BX_READ_64BIT_REG(i->rm());
-
 #if BX_SUPPORT_VMX
-  val_64 = VMexit_CR4_Write(i, val_64);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    val_64 = VMexit_CR4_Write(i, val_64);
 #endif
   BX_DEBUG(("MOV_CqRq: write to CR4 of %08x:%08x", GET32H(val_64), GET32L(val_64)));
   if (! SetCR4(val_64))
     exception(BX_GP_EXCEPTION, 0);
+
+  BX_INSTR_TLB_CNTRL(BX_CPU_ID, BX_INSTR_MOV_CR4, (Bit32u) val_64);
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR0(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR0(bxInstruction_c *i)
 {
-  // mov control register data to register
-  Bit64u val_64 = 0;
-
   if (CPL!=0) {
     BX_ERROR(("MOV_RqCq: #GP(0) if CPL is not 0"));
     exception(BX_GP_EXCEPTION, 0);
   }
+
+  Bit64u val_64;
 
   if (i->nnn() == 0) {
     // CR0
@@ -649,30 +679,15 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR0(bxInstruction_c *i)
   }
   else {
     // CR8
-
-#if BX_SUPPORT_VMX
-    VMexit_CR8_Read(i);
-    if (BX_CPU_THIS_PTR in_vmx_guest && VMEXIT(VMX_VM_EXEC_CTRL2_TPR_SHADOW)) {
-       val_64 = (VMX_Read_VTPR() >> 4) & 0xf;
-    }
-    else
-#endif
-    {
-      // CR8 is aliased to APIC->TASK PRIORITY register
-      //   APIC.TPR[7:4] = CR8[3:0]
-      //   APIC.TPR[3:0] = 0
-      // Reads of CR8 return zero extended APIC.TPR[7:4]
-      // Write to CR8 update APIC.TPR[7:4]
-#if BX_SUPPORT_APIC
-      val_64 = (BX_CPU_THIS_PTR lapic.get_tpr() >> 4) & 0xF;
-#endif
-    }
+    val_64 = ReadCR8(i);
   }
 
   BX_WRITE_64BIT_REG(i->rm(), val_64);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR2(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR2(bxInstruction_c *i)
 {
   if (i->nnn() != 2) {
     BX_ERROR(("MOV_RqCR2: #UD - register index out of range"));
@@ -685,9 +700,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR2(bxInstruction_c *i)
   }
 
   BX_WRITE_64BIT_REG(i->rm(), BX_CPU_THIS_PTR cr2);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR3(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR3(bxInstruction_c *i)
 {
   if (i->nnn() != 3) {
     BX_ERROR(("MOV_RqCR3: #UD - register index out of range"));
@@ -700,13 +717,16 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR3(bxInstruction_c *i)
   }
 
 #if BX_SUPPORT_VMX
-  VMexit_CR3_Read(i);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_CR3_Read(i);
 #endif
 
   BX_WRITE_64BIT_REG(i->rm(), BX_CPU_THIS_PTR cr3);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR4(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR4(bxInstruction_c *i)
 {
   if (i->nnn() != 4) {
     BX_ERROR(("MOV_RqCR4: #UD - register index out of range"));
@@ -721,14 +741,17 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RqCR4(bxInstruction_c *i)
   Bit64u val_64 = read_CR4(); /* correctly handle VMX */
 
   BX_WRITE_64BIT_REG(i->rm(), val_64);
+
+  BX_NEXT_INSTR(i);
 }
 #endif // #if BX_SUPPORT_X86_64
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::LMSW_Ew(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::LMSW_Ew(bxInstruction_c *i)
 {
   Bit16u msw;
 
-  if (!real_mode() && CPL!=0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("LMSW: CPL!=0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -746,7 +769,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::LMSW_Ew(bxInstruction_c *i)
   // LMSW does not affect PG,CD,NW,AM,WP,NE,ET bits, and cannot clear PE
 
 #if BX_SUPPORT_VMX
-  msw = VMexit_LMSW(i, msw);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    msw = VMexit_LMSW(i, msw);
 #endif
 
   // LMSW cannot clear PE
@@ -758,9 +782,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::LMSW_Ew(bxInstruction_c *i)
   Bit32u cr0 = (BX_CPU_THIS_PTR cr0.get32() & 0xfffffff0) | msw;
   if (! SetCR0(cr0))
     exception(BX_GP_EXCEPTION, 0);
+
+  BX_NEXT_TRACE(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::SMSW_EwR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::SMSW_EwR(bxInstruction_c *i)
 {
   Bit32u msw = (Bit32u) read_CR0();  // handle CR0 shadow in VMX
 
@@ -770,35 +796,17 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::SMSW_EwR(bxInstruction_c *i)
   else {
     BX_WRITE_16BIT_REG(i->rm(), msw & 0xffff);
   }
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::SMSW_EwM(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::SMSW_EwM(bxInstruction_c *i)
 {
   Bit16u msw = read_CR0() & 0xffff;   // handle CR0 shadow in VMX
   bx_address eaddr = BX_CPU_CALL_METHODR(i->ResolveModrm, (i));
   write_virtual_word(i->seg(), eaddr, msw);
-}
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_TdRd(bxInstruction_c *i)
-{
-#if BX_CPU_LEVEL <= 4
-  BX_PANIC(("MOV_TdRd: Still not implemented"));
-#else
-  // Pentium+ does not have TRx.  They were redesigned using the MSRs.
-  BX_INFO(("MOV_TdRd: causes #UD"));
-  exception(BX_UD_EXCEPTION, 0);
-#endif
-}
-
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MOV_RdTd(bxInstruction_c *i)
-{
-#if BX_CPU_LEVEL <= 4
-  BX_PANIC(("MOV_RdTd: Still not implemented"));
-#else
-  // Pentium+ does not have TRx.  They were redesigned using the MSRs.
-  BX_INFO(("MOV_RdTd: causes #UD"));
-  exception(BX_UD_EXCEPTION, 0);
-#endif
+  BX_NEXT_INSTR(i);
 }
 
 bx_address BX_CPU_C::read_CR0(void)
@@ -815,7 +823,7 @@ bx_address BX_CPU_C::read_CR0(void)
   return cr0_val;
 }
 
-#if BX_CPU_LEVEL > 3
+#if BX_CPU_LEVEL >= 5
 bx_address BX_CPU_C::read_CR4(void)
 {
   bx_address cr4_val = BX_CPU_THIS_PTR cr4.get32();
@@ -880,7 +888,9 @@ bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetCR0(bx_address val)
 
   Bit32u val_32 = GET32L(val);
 
+#if BX_CPU_LEVEL >= 6
   bx_bool pg = (val_32 >> 31) & 0x1;
+#endif
 
 #if BX_SUPPORT_X86_64
   if (! BX_CPU_THIS_PTR cr0.get_PG() && pg) {
@@ -965,13 +975,15 @@ bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetCR0(bx_address val)
   return 1;
 }
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
 Bit32u BX_CPU_C::get_cr4_allow_mask(void)
 {
   Bit32u allowMask = 0;
 
   // CR4 bits definitions:
-  //   [31-19] Reserved, Must be Zero
+  //   [31-21] Reserved, Must be Zero
+  //   [20]    SMEP: Supervisor Mode Execution Protection R/W
+  //   [19]    Reserved, Must be Zero
   //   [18]    OSXSAVE: Operating System XSAVE Support R/W
   //   [17]    PCIDE: PCID Support R/W
   //   [16]    FSGSBASE: FS/GS BASE access R/W
@@ -991,29 +1003,26 @@ Bit32u BX_CPU_C::get_cr4_allow_mask(void)
   //   [1]     PVI: Protected-Mode Virtual Interrupts R/W
   //   [0]     VME: Virtual-8086 Mode Extensions R/W
 
-#if BX_CPU_LEVEL >= 5
   /* VME */
   if (bx_cpuid_support_vme())
     allowMask |= BX_CR4_VME_MASK | BX_CR4_PVI_MASK;
 
-  allowMask |= BX_CR4_TSD_MASK;
+  if (bx_cpuid_support_tsc())
+    allowMask |= BX_CR4_TSD_MASK;
 
   if (bx_cpuid_support_debug_extensions())
     allowMask |= BX_CR4_DE_MASK;
 
   if (bx_cpuid_support_pse())
     allowMask |= BX_CR4_PSE_MASK;
-#endif
 
 #if BX_CPU_LEVEL >= 6
   if (bx_cpuid_support_pae())
     allowMask |= BX_CR4_PAE_MASK;
 #endif
 
-#if BX_CPU_LEVEL >= 5
   // NOTE: exception 18 (#MC) never appears in Bochs
   allowMask |= BX_CR4_MCE_MASK;
-#endif
 
 #if BX_CPU_LEVEL >= 6
   if (bx_cpuid_support_pge())
@@ -1028,15 +1037,14 @@ Bit32u BX_CPU_C::get_cr4_allow_mask(void)
   /* OSXMMEXCPT */
   if (bx_cpuid_support_sse())
     allowMask |= BX_CR4_OSXMMEXCPT_MASK;
-#endif
 
 #if BX_SUPPORT_VMX
-  allowMask |= BX_CR4_VMXE_MASK;
+  if (bx_cpuid_support_vmx())
+    allowMask |= BX_CR4_VMXE_MASK;
 #endif
 
-#if BX_SUPPORT_SMX
-  allowMask |= BX_CR4_SMXE_MASK;
-#endif
+  if (bx_cpuid_support_smx())
+    allowMask |= BX_CR4_SMXE_MASK;
 
 #if BX_SUPPORT_X86_64
   if (bx_cpuid_support_pcid())
@@ -1046,10 +1054,12 @@ Bit32u BX_CPU_C::get_cr4_allow_mask(void)
     allowMask |= BX_CR4_FSGSBASE_MASK;
 #endif
 
-#if BX_CPU_LEVEL >= 6
   /* OSXSAVE */
   if (bx_cpuid_support_xsave())
     allowMask |= BX_CR4_OSXSAVE_MASK;
+
+  if (bx_cpuid_support_smep())
+    allowMask |= BX_CR4_SMEP_MASK;
 #endif
 
   return allowMask;
@@ -1057,9 +1067,14 @@ Bit32u BX_CPU_C::get_cr4_allow_mask(void)
 
 bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::check_CR4(bx_address cr4_val)
 {
+  // check if trying to set undefined bits
+  if (cr4_val & ~((bx_address) BX_CPU_THIS_PTR cr4_suppmask)) {
+    BX_ERROR(("check_CR4(): write of 0x%08x not supported (allowMask=0x%x)", (Bit32u) cr4_val, BX_CPU_THIS_PTR cr4_suppmask));
+    return 0;
+  }
+
   bx_cr4_t temp_cr4;
-  bx_address cr4_allow_mask = get_cr4_allow_mask();
-  temp_cr4.val32 = (Bit32u) cr4_val;
+  temp_cr4.set32((Bit32u) cr4_val);
 
 #if BX_SUPPORT_X86_64
   if (long_mode()) {
@@ -1092,12 +1107,6 @@ bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::check_CR4(bx_address cr4_val)
   }
 #endif
 
-  // check if trying to set undefined bits
-  if (cr4_val & ~cr4_allow_mask) {
-    BX_ERROR(("check_CR4(): write of 0x%08x not supported (allowMask=0x%x)", (Bit32u) cr4_val, (Bit32u) cr4_allow_mask));
-    return 0;
-  }
-
   return 1;
 }
 
@@ -1106,9 +1115,9 @@ bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetCR4(bx_address val)
   if (! check_CR4(val)) return 0;
 
 #if BX_CPU_LEVEL >= 6
-  // Modification of PGE,PAE,PSE,PCIDE flushes TLB cache according to docs.
+  // Modification of PGE,PAE,PSE,PCIDE,SMEP flushes TLB cache according to docs.
   if ((val & BX_CR4_FLUSH_TLB_MASK) != (BX_CPU_THIS_PTR cr4.val32 & BX_CR4_FLUSH_TLB_MASK)) {
-    // reload PDPTR if PGE,PAE or PSE changed
+    // reload PDPTR if needed
     if (BX_CPU_THIS_PTR cr0.get_PG() && (val & BX_CR4_PAE_MASK) != 0 && !long_mode()) {
       if (! CheckPDPTR(BX_CPU_THIS_PTR cr3)) {
         BX_ERROR(("SetCR4(): PDPTR check failed !"));
@@ -1141,7 +1150,7 @@ bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetCR4(bx_address val)
 
   return 1;
 }
-#endif // BX_CPU_LEVEL >= 4
+#endif // BX_CPU_LEVEL >= 5
 
 bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetCR3(bx_address val)
 {
@@ -1167,15 +1176,106 @@ bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetCR3(bx_address val)
   return 1;
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::CLTS(bxInstruction_c *i)
+#if BX_CPU_LEVEL >= 5
+bx_bool BX_CPP_AttrRegparmN(1) BX_CPU_C::SetEFER(bx_address val_64)
 {
-  if (!real_mode() && CPL!=0) {
+  if (val_64 & ~((Bit64u) BX_CPU_THIS_PTR efer_suppmask)) {
+    BX_ERROR(("SetEFER: attempt to set reserved bits of EFER MSR !"));
+    return 0;
+  }
+
+  Bit32u val32 = (Bit32u) val_64;
+
+#if BX_SUPPORT_X86_64
+  /* #GP(0) if changing EFER.LME when cr0.pg = 1 */
+  if ((BX_CPU_THIS_PTR efer.get_LME() != ((val32 >> 8) & 1)) &&
+       BX_CPU_THIS_PTR  cr0.get_PG())
+  {
+    BX_ERROR(("SetEFER: attempt to change LME when CR0.PG=1"));
+    return 0;
+  }
+#endif
+
+  BX_CPU_THIS_PTR efer.set32((val32 & BX_CPU_THIS_PTR efer_suppmask & ~BX_EFER_LMA_MASK)
+        | (BX_CPU_THIS_PTR efer.get32() & BX_EFER_LMA_MASK)); // keep LMA untouched
+
+  return 1;
+}
+#endif
+
+#if BX_CPU_LEVEL >= 6
+void BX_CPU_C::WriteCR8(bxInstruction_c *i, bx_address val)
+{
+#if BX_SUPPORT_VMX
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_CR8_Write(i);
+#endif
+
+  // CR8 is aliased to APIC->TASK PRIORITY register
+  //   APIC.TPR[7:4] = CR8[3:0]
+  //   APIC.TPR[3:0] = 0
+  // Reads of CR8 return zero extended APIC.TPR[7:4]
+  // Write to CR8 update APIC.TPR[7:4]
+#if BX_SUPPORT_APIC
+  if (val & BX_CONST64(0xfffffffffffffff0)) {
+    BX_ERROR(("WriteCR8: Attempt to set reserved bits of CR8"));
+    exception(BX_GP_EXCEPTION, 0);
+  }
+#if BX_SUPPORT_VMX
+  if (BX_CPU_THIS_PTR in_vmx_guest && VMEXIT(VMX_VM_EXEC_CTRL2_TPR_SHADOW)) {
+    VMX_Write_VTPR((val & 0xf) << 4);
+  }
+  else
+#endif
+  {
+    BX_CPU_THIS_PTR lapic.set_tpr((val & 0xf) << 4);
+  }
+#endif // BX_SUPPORT_APIC
+}
+
+Bit32u BX_CPU_C::ReadCR8(bxInstruction_c *i)
+{
+  Bit32u tpr = 0;
+
+#if BX_SUPPORT_VMX
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_CR8_Read(i);
+
+  if (BX_CPU_THIS_PTR in_vmx_guest && VMEXIT(VMX_VM_EXEC_CTRL2_TPR_SHADOW)) {
+     tpr = (VMX_Read_VTPR() >> 4) & 0xf;
+  }
+  else
+#endif
+  {
+    // CR8 is aliased to APIC->TASK PRIORITY register
+    //   APIC.TPR[7:4] = CR8[3:0]
+    //   APIC.TPR[3:0] = 0
+    // Reads of CR8 return zero extended APIC.TPR[7:4]
+    // Write to CR8 update APIC.TPR[7:4]
+#if BX_SUPPORT_APIC
+    tpr = (BX_CPU_THIS_PTR lapic.get_tpr() >> 4) & 0xf;
+#endif
+  }
+
+  return tpr;
+}
+
+#endif
+
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::CLTS(bxInstruction_c *i)
+{
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("CLTS: priveledge check failed, generate #GP(0)"));
     exception(BX_GP_EXCEPTION, 0);
   }
 
 #if BX_SUPPORT_VMX
-  if(VMexit_CLTS(i)) return;
+  if (BX_CPU_THIS_PTR in_vmx_guest) {
+    if(VMexit_CLTS(i)) {
+      BX_NEXT_TRACE(i);
+    }
+  }
 #endif
 
   BX_CPU_THIS_PTR cr0.set_TS(0);
@@ -1186,32 +1286,47 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::CLTS(bxInstruction_c *i)
   handleAvxModeChange();
 #endif
 #endif
+
+  BX_NEXT_TRACE(i);
 }
 
 #if BX_X86_DEBUGGER
-bx_bool BX_CPU_C::hwbreakpoint_check(bx_address laddr)
+bx_bool BX_CPU_C::hwbreakpoint_check(bx_address laddr, unsigned opa, unsigned opb)
 {
   laddr = LPFOf(laddr);
 
-  for (int i=0;i<4;i++) {
-    if (laddr == LPFOf(BX_CPU_THIS_PTR dr[i]))
+  Bit32u dr_op[4];
+
+  dr_op[0] = BX_CPU_THIS_PTR dr7.get_R_W0();
+  dr_op[1] = BX_CPU_THIS_PTR dr7.get_R_W1();
+  dr_op[2] = BX_CPU_THIS_PTR dr7.get_R_W2();
+  dr_op[3] = BX_CPU_THIS_PTR dr7.get_R_W3();
+
+  for (int n=0;n<4;n++) {
+    if ((dr_op[n] == opa || dr_op[n] == opb) && laddr == LPFOf(BX_CPU_THIS_PTR dr[n])) {
       return 1;
+    }
   }
 
   return 0;
 }
 
-void BX_CPU_C::code_breakpoint_match(bx_address laddr)
+Bit32u BX_CPU_C::code_breakpoint_match(bx_address laddr)
 {
+  if (BX_CPU_THIS_PTR get_RF() || BX_CPU_THIS_PTR in_repeat)
+    return 0;
+
   if (BX_CPU_THIS_PTR dr7.get_bp_enabled()) {
     Bit32u dr6_bits = hwdebug_compare(laddr, 1, BX_HWDebugInstruction, BX_HWDebugInstruction);
     if (dr6_bits) {
       // Add to the list of debug events thus far.
       BX_CPU_THIS_PTR debug_trap |= dr6_bits;
       BX_ERROR(("#DB: x86 code breakpoint catched"));
-      exception(BX_DB_EXCEPTION, 0); // no error, not interrupt
+      return dr6_bits;
     }
   }
+
+  return 0;
 }
 
 void BX_CPU_C::hwbreakpoint_match(bx_address laddr, unsigned len, unsigned rw)

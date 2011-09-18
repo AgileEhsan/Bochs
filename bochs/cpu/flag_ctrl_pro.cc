@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2009  The Bochs Project
+//  Copyright (C) 2001-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -35,7 +35,9 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::setEFlags(Bit32u val)
   }
 #endif
 
-  if (val & (EFlagsTFMask|EFlagsRFMask)) {
+  if (val & EFlagsRFMask) invalidate_prefetch_q();
+
+  if (val & EFlagsTFMask) {
     BX_CPU_THIS_PTR async_event = 1; // TF == 1 || RF == 1
   }
 
@@ -45,7 +47,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::setEFlags(Bit32u val)
   }
 
   BX_CPU_THIS_PTR eflags = val;
-  BX_CPU_THIS_PTR lf_flags_status = 0; // OSZAPC flags are known.
+  setEFlagsOSZAPC(val);			// update lazy flags state
 
 #if BX_CPU_LEVEL >= 4 && BX_SUPPORT_ALIGNMENT_CHECK
   handleAlignmentCheck(/* EFLAGS.AC reloaded */);
@@ -70,10 +72,9 @@ BX_CPU_C::writeEFlags(Bit32u flags, Bit32u changeMask)
   // Screen out changing of any unsupported bits.
   changeMask &= supportMask;
 
-  Bit32u newEFlags = (BX_CPU_THIS_PTR eflags & ~changeMask) |
+  Bit32u newEFlags = (BX_CPU_THIS_PTR read_eflags() & ~changeMask) |
               (flags & changeMask);
   setEFlags(newEFlags);
-  // OSZAPC flags are known - done in setEFlags(newEFlags)
 }
 
   void BX_CPP_AttrRegparmN(3)
@@ -97,18 +98,15 @@ BX_CPU_C::write_flags(Bit16u flags, bx_bool change_IOPL, bx_bool change_IF)
 // Cause arithmetic flags to be in known state and cached in val32.
 Bit32u BX_CPU_C::force_flags(void)
 {
-  if (BX_CPU_THIS_PTR lf_flags_status) {
-    Bit32u newflags;
+  Bit32u newflags  = getB_CF();
+         newflags |= getB_PF() << 2;
+         newflags |= getB_AF() << 4;
+         newflags |= getB_ZF() << 6;
+         newflags |= getB_SF() << 7;
+         newflags |= getB_OF() << 11;
 
-    newflags  = get_CF() ? EFlagsCFMask : 0;
-    newflags |= get_PF() ? EFlagsPFMask : 0;
-    newflags |= get_AF() ? EFlagsAFMask : 0;
-    newflags |= get_ZF() ? EFlagsZFMask : 0;
-    newflags |= get_SF() ? EFlagsSFMask : 0;
-    newflags |= get_OF() ? EFlagsOFMask : 0;
-
-    setEFlagsOSZAPC(newflags);
-  }
+  BX_CPU_THIS_PTR eflags = (BX_CPU_THIS_PTR eflags & ~EFlagsOSZAPCMask)
+    | (newflags & EFlagsOSZAPCMask);
 
   return BX_CPU_THIS_PTR eflags;
 }

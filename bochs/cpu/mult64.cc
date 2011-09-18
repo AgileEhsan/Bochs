@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2009  The Bochs Project
+//  Copyright (C) 2001-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -199,7 +199,7 @@ void long_idiv(Bit128s *quotient,Bit64s *remainder,Bit128s *dividend,Bit64s divi
   }
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::MUL_RAXEqR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::MUL_RAXEqR(bxInstruction_c *i)
 {
   Bit128u product_128;
 
@@ -222,9 +222,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::MUL_RAXEqR(bxInstruction_c *i)
   {
     ASSERT_FLAGS_OxxxxC();
   }
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_RAXEqR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_RAXEqR(bxInstruction_c *i)
 {
   Bit128s product_128;
 
@@ -252,9 +254,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_RAXEqR(bxInstruction_c *i)
   if (((Bit64u)(product_128.hi) + (product_128.lo >> 63)) != 0) {
     ASSERT_FLAGS_OxxxxC();
   }
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::DIV_RAXEqR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::DIV_RAXEqR(bxInstruction_c *i)
 {
   Bit64u remainder_64, quotient_64l;
   Bit128u op1_128, quotient_128;
@@ -284,9 +288,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::DIV_RAXEqR(bxInstruction_c *i)
   /* now write quotient back to destination */
   RAX = quotient_64l;
   RDX = remainder_64;
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::IDIV_RAXEqR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::IDIV_RAXEqR(bxInstruction_c *i)
 {
   Bit64s remainder_64, quotient_64l;
   Bit128s op1_128, quotient_128;
@@ -312,7 +318,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::IDIV_RAXEqR(bxInstruction_c *i)
   quotient_64l = quotient_128.lo;
 
   if ((!(quotient_128.lo & BX_CONST64(0x8000000000000000)) && quotient_128.hi != (Bit64s) 0) ||
-        (quotient_128.lo & BX_CONST64(0x8000000000000000)) && quotient_128.hi != (Bit64s) BX_CONST64(0xffffffffffffffff))
+       ((quotient_128.lo & BX_CONST64(0x8000000000000000)) && quotient_128.hi != (Bit64s) BX_CONST64(0xffffffffffffffff)))
   {
     exception(BX_DE_EXCEPTION, 0);
   }
@@ -324,16 +330,18 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::IDIV_RAXEqR(bxInstruction_c *i)
   /* now write quotient back to destination */
   RAX = quotient_64l;
   RDX = remainder_64;
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_GqEqIdR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_GqEqIdR(bxInstruction_c *i)
 {
   Bit128s product_128;
 
-  Bit64s op2_64 = BX_READ_64BIT_REG(i->rm());
-  Bit64s op3_64 = (Bit32s) i->Id();
+  Bit64s op1_64 = BX_READ_64BIT_REG(i->rm());
+  Bit64s op2_64 = (Bit32s) i->Id();
 
-  long_imul(&product_128,op2_64,op3_64);
+  long_imul(&product_128,op1_64,op2_64);
 
   /* now write product back to destination */
   BX_WRITE_64BIT_REG(i->nnn(), product_128.lo);
@@ -343,9 +351,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_GqEqIdR(bxInstruction_c *i)
   if (((Bit64u)(product_128.hi) + (product_128.lo >> 63)) != 0) {
     ASSERT_FLAGS_OxxxxC();
   }
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_GqEqR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_GqEqR(bxInstruction_c *i)
 {
   Bit128s product_128;
 
@@ -362,6 +372,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::IMUL_GqEqR(bxInstruction_c *i)
   if (((Bit64u)(product_128.hi) + (product_128.lo >> 63)) != 0) {
     ASSERT_FLAGS_OxxxxC();
   }
+
+  BX_NEXT_INSTR(i);
 }
 
 #endif /* if BX_SUPPORT_X86_64 */

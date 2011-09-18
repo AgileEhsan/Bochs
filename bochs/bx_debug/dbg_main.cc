@@ -92,8 +92,9 @@ static void bx_unnest_infile(void);
 static void bx_get_command(void);
 static void bx_dbg_print_guard_results();
 static void bx_dbg_breakpoint_changed(void);
+static void bx_dbg_set_icount_guard(int which_cpu, Bit32u n);
 
-bx_guard_t        bx_guard;
+bx_guard_t bx_guard;
 
 // DMA stuff
 void bx_dbg_post_dma_reports(void);
@@ -371,7 +372,7 @@ void bx_get_command(void)
     }
 
     dbg_printf("fgets() returned ERROR.\n");
-    dbg_printf("intr request was %u\n", bx_guard.interrupt_requested);
+    dbg_printf("debugger interrupt request was %u\n", bx_guard.interrupt_requested);
     bx_dbg_exit(1);
   }
   tmp_buf_ptr = &tmp_buf[0];
@@ -911,9 +912,10 @@ void bx_dbg_info_control_regs_command(void)
   dbg_printf("CR3=0x" FMT_PHY_ADDRX "\n", cr3);
   dbg_printf("    PCD=page-level cache disable=%d\n", (cr3>>4) & 1);
   dbg_printf("    PWT=page-level write-through=%d\n", (cr3>>3) & 1);
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   Bit32u cr4 = SIM->get_param_num("CR4", dbg_cpu_list)->get();
-  dbg_printf("CR4=0x%08x: %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n", cr4,
+  dbg_printf("CR4=0x%08x: %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n", cr4,
+    (cr4 & (1<<20)) ? "SMEP" : "smep",
     (cr4 & (1<<18)) ? "OSXSAVE" : "osxsave",
     (cr4 & (1<<17)) ? "PCID" : "pcid",
     (cr4 & (1<<16)) ? "FSGSBASE" : "fsgsbase",
@@ -1279,6 +1281,18 @@ void bx_dbg_modebp_command()
   BX_CPU(dbg_cpu)->mode_break = !BX_CPU(dbg_cpu)->mode_break;
   dbg_printf("mode switch break %s\n",
     BX_CPU(dbg_cpu)->mode_break ? "enabled" : "disabled");
+}
+
+// toggles vmexit switch breakpoint
+void bx_dbg_vmexitbp_command()
+{
+#if BX_SUPPORT_VMX
+  BX_CPU(dbg_cpu)->vmexit_break = !BX_CPU(dbg_cpu)->vmexit_break;
+  dbg_printf("vmexit switch break %s\n",
+    BX_CPU(dbg_cpu)->vmexit_break ? "enabled" : "disabled");
+#else
+  dbg_printf("VMX is not compiled in, cannot set vmexit breakpoint !");
+#endif
 }
 
 bx_bool bx_dbg_read_linear(unsigned which_cpu, bx_address laddr, unsigned len, Bit8u *buf)
@@ -1760,14 +1774,6 @@ void bx_dbg_continue_command(void)
 
 one_more:
 
-  // I must guard for ICOUNT or one CPU could run forever without giving
-  // the others a chance.
-  for (cpu=0; cpu < BX_SMP_PROCESSORS; cpu++) {
-    BX_CPU(cpu)->guard_found.guard_found = 0;
-    BX_CPU(cpu)->guard_found.icount = 0;
-    BX_CPU(cpu)->guard_found.time_tick = bx_pc_system.time_ticks();
-  }
-
   // update gui (disable continue command, enable stop command, etc.)
   sim_running->set(1);
   SIM->refresh_ci();
@@ -1790,34 +1796,45 @@ one_more:
 
 #define BX_DBG_DEFAULT_ICOUNT_QUANTUM 5
 
-    Bit32u quantum = (BX_SMP_PROCESSORS>1) ? BX_DBG_DEFAULT_ICOUNT_QUANTUM : 0;
-    Bit32u max_executed = 0;
-    for (cpu=0; cpu < BX_SMP_PROCESSORS; cpu++) {
-      Bit64u cpu_icount = BX_CPU(cpu)->guard_found.icount;
-      BX_CPU(cpu)->cpu_loop(quantum);
-      Bit32u executed = BX_CPU(cpu)->guard_found.icount - cpu_icount;
-      if (executed > max_executed) max_executed = executed;
+    if (BX_SMP_PROCESSORS == 1) {
+      bx_dbg_set_icount_guard(0, 0); // run to next breakpoint
+      BX_CPU(0)->cpu_loop(0);
       // set stop flag if a guard found other than icount or halted
-      unsigned found = BX_CPU(cpu)->guard_found.guard_found;
-      stop_reason_t reason = (stop_reason_t) BX_CPU(cpu)->stop_reason;
+      unsigned found = BX_CPU(0)->guard_found.guard_found;
+      stop_reason_t reason = (stop_reason_t) BX_CPU(0)->stop_reason;
       if (found || (reason != STOP_NO_REASON && reason != STOP_CPU_HALTED)) {
         stop = 1;
         which = cpu;
       }
-      // even if stop==1, finish cycling through all processors.
-      // "which" remembers which cpu set the stop flag.  If multiple
-      // cpus set stop, too bad.
     }
-
 #if BX_SUPPORT_SMP
-    // increment time tick only after all processors have had their chance.
-    if (BX_SMP_PROCESSORS > 1) {
-      // potential deadlock if all processors are halted.  Then
+    else {
+      Bit32u max_executed = 0;
+      for (cpu=0; cpu < BX_SMP_PROCESSORS; cpu++) {
+        Bit64u cpu_icount = BX_CPU(cpu)->get_icount();
+        bx_dbg_set_icount_guard(cpu, BX_DBG_DEFAULT_ICOUNT_QUANTUM);
+        BX_CPU(cpu)->cpu_loop(0);
+        Bit32u executed = BX_CPU(cpu)->get_icount() - cpu_icount;
+        if (executed > max_executed) max_executed = executed;
+        // set stop flag if a guard found other than icount or halted
+        unsigned found = BX_CPU(cpu)->guard_found.guard_found;
+        stop_reason_t reason = (stop_reason_t) BX_CPU(cpu)->stop_reason;
+        if (found || (reason != STOP_NO_REASON && reason != STOP_CPU_HALTED)) {
+          stop = 1;
+          which = cpu;
+        }
+        // even if stop==1, finish cycling through all processors.
+        // "which" remembers which cpu set the stop flag.  If multiple
+        // cpus set stop, too bad.
+      }
+
+      // Potential deadlock if all processors are halted.  Then
       // max_executed will be 0, tick will be incremented by zero, and
-      // there will never be a timed event to wake them up.  To avoid this,
-      // always tick by a minimum of 1.
+      // there will never be a timed event to wake them up.
+      // To avoid this, always tick by a minimum of 1.
       if (max_executed < 1) max_executed=1;
 
+      // increment time tick only after all processors have had their chance.
       BX_TICKN(max_executed);
     }
 #endif
@@ -1853,16 +1870,10 @@ void bx_dbg_stepN_command(int cpu, Bit32u count)
   // is printed, we will return to config mode.
   SIM->set_display_mode(DISP_MODE_SIM);
 
-  // reset guard counters for all CPUs
-  for (unsigned n=0; n < BX_SMP_PROCESSORS; n++) {
-    BX_CPU(n)->guard_found.icount = 0;
-    BX_CPU(n)->guard_found.time_tick = bx_pc_system.time_ticks();
-  }
-
-  if (cpu >= 0 || BX_SUPPORT_SMP==0) {
+  if (cpu >= 0 || BX_SMP_PROCESSORS == 1) {
     bx_guard.interrupt_requested = 0;
-    BX_CPU(cpu)->guard_found.guard_found = 0;
-    BX_CPU(cpu)->cpu_loop(count);
+    bx_dbg_set_icount_guard(cpu, count);
+    BX_CPU(cpu)->cpu_loop(0);
   }
 #if BX_SUPPORT_SMP
   else {
@@ -1871,8 +1882,8 @@ void bx_dbg_stepN_command(int cpu, Bit32u count)
     for (unsigned cycle=0; !stop && cycle < count; cycle++) {
       for (unsigned ncpu=0; ncpu < BX_SMP_PROCESSORS; ncpu++) {
         bx_guard.interrupt_requested = 0;
-        BX_CPU(ncpu)->guard_found.guard_found = 0;
-        BX_CPU(ncpu)->cpu_loop(1);
+        bx_dbg_set_icount_guard(cpu, 1);
+        BX_CPU(ncpu)->cpu_loop(0);
         // set stop flag if a guard found other than icount or halted
         unsigned found = BX_CPU(ncpu)->guard_found.guard_found;
         stop_reason_t reason = (stop_reason_t) BX_CPU(ncpu)->stop_reason;
@@ -1881,7 +1892,7 @@ void bx_dbg_stepN_command(int cpu, Bit32u count)
       }
 
       // when (BX_SMP_PROCESSORS == 1) ticks are handled inside the cpu loop
-      if (BX_SMP_PROCESSORS > 1) BX_TICK1();
+      BX_TICK1();
     }
   }
 #endif
@@ -2005,6 +2016,9 @@ void bx_dbg_print_guard_results(void)
         dbg_printf("(%u) Caught mode switch breakpoint switching to '%s'\n",
           cpu, cpu_mode_string(BX_CPU(cpu)->get_cpu_mode()));
         break;
+    case STOP_VMEXIT_BREAK_POINT:
+        dbg_printf("(%u) Caught VMEXIT breakpoint\n", cpu);
+        break;
     default:
         dbg_printf("Error: (%u) print_guard_results: guard_found ? (stop reason %u)\n",
           cpu, BX_CPU(cpu)->stop_reason);
@@ -2018,12 +2032,19 @@ void bx_dbg_print_guard_results(void)
       bx_dbg_disassemble_current(cpu, 0);  // one cpu, don't print time
     }
   }
-#if 0
-  // print the TSC value for every CPU
-  for (cpu=0; cpu<BX_SMP_PROCESSORS; cpu++) {
-    dbg_printf("TSC[%d] = " FMT_LL "d\n", cpu, BX_CPU(cpu)->tsc);
+}
+
+void bx_dbg_set_icount_guard(int which_cpu, Bit32u n)
+{
+  if (n == 0) {
+    bx_guard.guard_for &= ~BX_DBG_GUARD_ICOUNT;
   }
-#endif
+  else {
+    bx_guard.guard_for |= BX_DBG_GUARD_ICOUNT;
+    BX_CPU(which_cpu)->guard_found.icount_max = BX_CPU(which_cpu)->get_icount() + n;
+  }
+
+  BX_CPU(which_cpu)->guard_found.guard_found = 0;
 }
 
 void bx_dbg_breakpoint_changed(void)
@@ -3571,7 +3592,7 @@ void bx_dbg_print_help(void)
   dbg_printf("    help, q|quit|exit, set, instrument, show, trace, trace-reg,\n");
   dbg_printf("    trace-mem, u|disasm, record, playback, ldsym, slist\n");
   dbg_printf("-*- Execution control -*-\n");
-  dbg_printf("    c|cont|continue, s|step, p|n|next, modebp\n");
+  dbg_printf("    c|cont|continue, s|step, p|n|next, modebp, vmexitbp\n");
   dbg_printf("-*- Breakpoint management -*-\n");
   dbg_printf("    vb|vbreak, lb|lbreak, pb|pbreak|b|break, sb, sba, blist,\n");
   dbg_printf("    bpe, bpd, d|del|delete, watch, unwatch\n");

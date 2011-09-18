@@ -35,7 +35,7 @@
 #include "pci.h"
 #endif
 #include "ne2k.h"
-#include "eth.h"
+#include "netmod.h"
 
 //Never completely fill the ne2k ring so that we never
 // hit the unclear completely full buffer condition.
@@ -224,7 +224,7 @@ void bx_ne2k_c::register_state(void)
   new bx_shadow_bool_c(list, "tx_timer_active", &BX_NE2K_THIS s.tx_timer_active);
 #if BX_SUPPORT_PCI
   if (BX_NE2K_THIS s.pci_enabled) {
-    register_pci_state(list, BX_NE2K_THIS s.pci_conf);
+    register_pci_state(list);
   }
 #endif
 }
@@ -235,7 +235,7 @@ void bx_ne2k_c::after_restore_state(void)
   if (BX_NE2K_THIS s.pci_enabled) {
     if (DEV_pci_set_base_io(BX_NE2K_THIS_PTR, read_handler, write_handler,
                             &BX_NE2K_THIS s.base_address,
-                            &BX_NE2K_THIS s.pci_conf[0x10],
+                            &BX_NE2K_THIS pci_conf[0x10],
                             32, &ne2k_iomask[0], "NE2000 PCI NIC")) {
       BX_INFO(("new base address: 0x%04x", BX_NE2K_THIS s.base_address));
     }
@@ -1428,18 +1428,18 @@ void bx_ne2k_c::init(void)
         BX_PLUGIN_NE2K, devname);
 
     for (unsigned i=0; i<256; i++)
-      BX_NE2K_THIS s.pci_conf[i] = 0x0;
+      BX_NE2K_THIS pci_conf[i] = 0x0;
     // readonly registers
-    BX_NE2K_THIS s.pci_conf[0x00] = 0xec;
-    BX_NE2K_THIS s.pci_conf[0x01] = 0x10;
-    BX_NE2K_THIS s.pci_conf[0x02] = 0x29;
-    BX_NE2K_THIS s.pci_conf[0x03] = 0x80;
-    BX_NE2K_THIS s.pci_conf[0x04] = 0x01;
-    BX_NE2K_THIS s.pci_conf[0x0a] = 0x00;
-    BX_NE2K_THIS s.pci_conf[0x0b] = 0x02;
-    BX_NE2K_THIS s.pci_conf[0x0e] = 0x00;
-    BX_NE2K_THIS s.pci_conf[0x10] = 0x01;
-    BX_NE2K_THIS s.pci_conf[0x3d] = BX_PCI_INTA;
+    BX_NE2K_THIS pci_conf[0x00] = 0xec;
+    BX_NE2K_THIS pci_conf[0x01] = 0x10;
+    BX_NE2K_THIS pci_conf[0x02] = 0x29;
+    BX_NE2K_THIS pci_conf[0x03] = 0x80;
+    BX_NE2K_THIS pci_conf[0x04] = 0x01;
+    BX_NE2K_THIS pci_conf[0x0a] = 0x00;
+    BX_NE2K_THIS pci_conf[0x0b] = 0x02;
+    BX_NE2K_THIS pci_conf[0x0e] = 0x00;
+    BX_NE2K_THIS pci_conf[0x10] = 0x01;
+    BX_NE2K_THIS pci_conf[0x3d] = BX_PCI_INTA;
     BX_NE2K_THIS s.base_address = 0x0;
   }
 #endif
@@ -1509,34 +1509,15 @@ void bx_ne2k_c::init(void)
   for (int i = 12; i < 32; i++)
     BX_NE2K_THIS s.macaddr[i] = 0x57;
 
-  // Attach to the simulated ethernet dev
-  const char *ethmod = SIM->get_param_enum("ethmod", base)->get_selected();
-  BX_NE2K_THIS ethdev = eth_locator_c::create(ethmod,
-                                              SIM->get_param_string("ethdev", base)->getptr(),
-                                              (const char *) SIM->get_param_string("macaddr", base)->getptr(),
-                                              rx_handler,
-                                              this,
-                                              SIM->get_param_string("script", base)->getptr());
-
-  if (BX_NE2K_THIS ethdev == NULL) {
-    BX_PANIC(("could not find eth module %s", ethmod));
-    // if they continue, use null.
-    BX_INFO(("could not find eth module %s - using null instead", ethmod));
-
-    BX_NE2K_THIS ethdev = eth_locator_c::create("null", NULL,
-                                                (const char *) SIM->get_param_string("macaddr", base)->getptr(),
-                                                rx_handler,
-                                                this, "");
-    if (BX_NE2K_THIS ethdev == NULL)
-      BX_PANIC(("could not locate null module"));
-  }
+  // Attach to the selected ethernet module
+  BX_NE2K_THIS ethdev = DEV_net_init_module(base, rx_handler, this);
 }
 
 void bx_ne2k_c::set_irq_level(bx_bool level)
 {
   if (BX_NE2K_THIS s.pci_enabled) {
 #if BX_SUPPORT_PCI
-    DEV_pci_set_irq(BX_NE2K_THIS s.devfunc, BX_NE2K_THIS s.pci_conf[0x3d], level);
+    DEV_pci_set_irq(BX_NE2K_THIS s.devfunc, BX_NE2K_THIS pci_conf[0x3d], level);
 #endif
   } else {
     if (level) {
@@ -1555,7 +1536,7 @@ Bit32u bx_ne2k_c::pci_read_handler(Bit8u address, unsigned io_len)
   Bit32u value = 0;
 
   for (unsigned i=0; i<io_len; i++) {
-    value |= (BX_NE2K_THIS s.pci_conf[address+i] << (i*8));
+    value |= (BX_NE2K_THIS pci_conf[address+i] << (i*8));
   }
   BX_DEBUG(("NE2000 PCI NIC read  register 0x%02x value 0x%08x", address, value));
   return value;
@@ -1570,7 +1551,7 @@ void bx_ne2k_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_len)
   if ((address > 0x13) && (address < 0x34))
     return;
   for (unsigned i=0; i<io_len; i++) {
-    oldval = BX_NE2K_THIS s.pci_conf[address+i];
+    oldval = BX_NE2K_THIS pci_conf[address+i];
     value8 = (value >> (i*8)) & 0xFF;
     switch (address+i) {
       case 0x05:
@@ -1578,12 +1559,12 @@ void bx_ne2k_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_len)
       case 0x3d:
         break;
       case 0x04:
-        BX_NE2K_THIS s.pci_conf[address+i] = value8 & 0x03;
+        BX_NE2K_THIS pci_conf[address+i] = value8 & 0x03;
         break;
       case 0x3c:
         if (value8 != oldval) {
           BX_INFO(("new irq line = %d", value8));
-          BX_NE2K_THIS s.pci_conf[address+i] = value8;
+          BX_NE2K_THIS pci_conf[address+i] = value8;
         }
         break;
       case 0x10:
@@ -1593,7 +1574,7 @@ void bx_ne2k_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_len)
       case 0x13:
         baseaddr_change |= (value8 != oldval);
       default:
-        BX_NE2K_THIS s.pci_conf[address+i] = value8;
+        BX_NE2K_THIS pci_conf[address+i] = value8;
         BX_DEBUG(("NE2000 PCI NIC write register 0x%02x value 0x%02x", address+i,
                   value8));
     }
@@ -1601,7 +1582,7 @@ void bx_ne2k_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_len)
   if (baseaddr_change) {
     if (DEV_pci_set_base_io(BX_NE2K_THIS_PTR, read_handler, write_handler,
                             &BX_NE2K_THIS s.base_address,
-                            &BX_NE2K_THIS s.pci_conf[0x10],
+                            &BX_NE2K_THIS pci_conf[0x10],
                             32, &ne2k_iomask[0], "NE2000 PCI NIC")) {
       BX_INFO(("new base address: 0x%04x", BX_NE2K_THIS s.base_address));
     }

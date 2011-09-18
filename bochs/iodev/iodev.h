@@ -26,6 +26,7 @@
 #define IODEV_H
 
 #include "bochs.h"
+#include "plugin.h"
 #include "param_names.h"
 
 /* number of IRQ lines supported.  In an ISA PC there are two
@@ -35,10 +36,6 @@
 
 /* size of internal buffer for mouse devices */
 #define BX_MOUSE_BUFF_SIZE 48
-
-#if 0
-class bx_g2h_c;
-#endif
 
 typedef Bit32u (*bx_read_handler_t)(void *, Bit32u, unsigned);
 typedef void   (*bx_write_handler_t)(void *, Bit32u, Bit32u, unsigned);
@@ -81,12 +78,16 @@ class BOCHSAPI bx_devmodel_c : public logfunctions {
 
 class bx_list_c;
 class device_image_t;
+class LOWLEVEL_CDROM;
 
 // the best should be deriving of bx_pci_device_stub_c from bx_devmodel_c
 // but it make serious problems for cirrus_svga device
 class BOCHSAPI bx_pci_device_stub_c {
 public:
-  virtual ~bx_pci_device_stub_c() {}
+  bx_pci_device_stub_c(): pci_rom(NULL), pci_rom_size(0) {}
+  virtual ~bx_pci_device_stub_c() {
+    if (pci_rom != NULL) delete [] pci_rom;
+  }
 
   virtual Bit32u pci_read_handler(Bit8u address, unsigned io_len) {
     return 0;
@@ -94,7 +95,16 @@ public:
 
   virtual void pci_write_handler(Bit8u address, Bit32u value, unsigned io_len) {}
 
-  void register_pci_state(bx_list_c *list, Bit8u *pci_conf);
+  void register_pci_state(bx_list_c *list);
+
+  void load_pci_rom(const char *path);
+
+protected:
+  Bit8u pci_conf[256];
+  Bit32u pci_base_address[6];
+  Bit8u  *pci_rom;
+  Bit32u pci_rom_address;
+  Bit32u pci_rom_size;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -125,9 +135,6 @@ public:
   }
   virtual void   reset(unsigned type) {
     STUBFUNC(HD, reset);
-  }
-  virtual Bit32u   get_device_handle(Bit8u channel, Bit8u device) {
-    STUBFUNC(HD, get_device_handle); return 0;
   }
   virtual Bit32u   get_first_cd_handle(void) {
     STUBFUNC(HD, get_first_cd_handle); return 0;
@@ -241,9 +248,18 @@ public:
   virtual void mem_write(bx_phy_address addr, Bit8u value) {
     STUBFUNC(vga, mem_write);
   }
+  virtual int get_snapshot_mode(void) {
+    STUBFUNC(vga, get_snapshot_mode);
+    return 0;
+  }
   virtual void get_text_snapshot(Bit8u **text_snapshot,
                                  unsigned *txHeight, unsigned *txWidth) {
     STUBFUNC(vga, get_text_snapshot);
+  }
+  virtual Bit32u get_gfx_snapshot(Bit8u **snapshot_ptr, Bit8u **palette_ptr,
+                                  unsigned *iHeight, unsigned *iWidth, unsigned *iDepth) {
+    STUBFUNC(vga, get_gfx_snapshot);
+    return 0;
   }
   virtual void trigger_timer(void *this_ptr) {
     STUBFUNC(vga, trigger_timer);
@@ -314,7 +330,7 @@ public:
   }
 };
 
-#if BX_SUPPORT_ACPI
+#if BX_SUPPORT_PCI
 class BOCHSAPI bx_acpi_ctrl_stub_c : public bx_devmodel_c, public bx_pci_device_stub_c {
 public:
   virtual void generate_smi(Bit8u value) {}
@@ -341,6 +357,15 @@ public:
 };
 #endif
 
+#if BX_SUPPORT_GAMEPORT
+class BOCHSAPI bx_game_stub_c : public bx_devmodel_c {
+public:
+  virtual void set_enabled(bx_bool val) {
+    STUBFUNC(gameport, set_enabled);
+  }
+};
+#endif
+
 #if BX_SUPPORT_PCIUSB
 class BOCHSAPI bx_usb_devctl_stub_c : public bx_devmodel_c {
 public:
@@ -356,13 +381,27 @@ public:
   virtual device_image_t* init_image(Bit8u image_mode, Bit64u disk_size, const char *journal) {
     STUBFUNC(hdimage_ctl, init_image); return NULL;
   }
+#ifdef LOWLEVEL_CDROM
+  virtual LOWLEVEL_CDROM* init_cdrom(const char *dev) {
+    STUBFUNC(hdimage_ctl, init_cdrom); return NULL;
+  }
+#endif
 };
 
 #if BX_SUPPORT_SOUNDLOW
 class BOCHSAPI bx_soundmod_ctl_stub_c : public bx_devmodel_c {
 public:
-  virtual int init_module(const char *type, void **module, logfunctions *dev) {
-    STUBFUNC(soundmod_ctl, init_module); return 0;
+  virtual void* init_module(const char *type, logfunctions *dev) {
+    STUBFUNC(soundmod_ctl, init_module); return NULL;
+  }
+};
+#endif
+
+#if BX_NETWORKING
+class BOCHSAPI bx_netmod_ctl_stub_c : public bx_devmodel_c {
+public:
+  virtual void* init_module(bx_list_c *base, void* rxh, bx_devmodel_c *dev) {
+    STUBFUNC(netmod_ctl, init_module); return NULL;
   }
 };
 #endif
@@ -427,7 +466,7 @@ public:
   bx_pci_bridge_stub_c *pluginPciBridge;
   bx_pci2isa_stub_c *pluginPci2IsaBridge;
   bx_pci_ide_stub_c *pluginPciIdeController;
-#if BX_SUPPORT_ACPI
+#if BX_SUPPORT_PCI
   bx_acpi_ctrl_stub_c *pluginACPIController;
 #endif
   bx_devmodel_c     *pluginPitDevice;
@@ -447,14 +486,17 @@ public:
 #if BX_SUPPORT_APIC
   bx_ioapic_stub_c  *pluginIOAPIC;
 #endif
+#if BX_SUPPORT_GAMEPORT
+  bx_game_stub_c  *pluginGameport;
+#endif
 #if BX_SUPPORT_PCIUSB
   bx_usb_devctl_stub_c  *pluginUsbDevCtl;
 #endif
 #if BX_SUPPORT_SOUNDLOW
   bx_soundmod_ctl_stub_c  *pluginSoundModCtl;
 #endif
-#if 0
-  bx_g2h_c          *g2h;
+#if BX_NETWORKING
+  bx_netmod_ctl_stub_c  *pluginNetModCtl;
 #endif
 
   // stub classes that the pointers (above) can point to until a plugin is
@@ -472,7 +514,7 @@ public:
   bx_pci_ide_stub_c stubPciIde;
   bx_ne2k_stub_c    stubNE2k;
   bx_speaker_stub_c stubSpeaker;
-#if BX_SUPPORT_ACPI
+#if BX_SUPPORT_PCI
   bx_acpi_ctrl_stub_c stubACPIController;
 #endif
 #if BX_SUPPORT_IODEBUG
@@ -481,11 +523,17 @@ public:
 #if BX_SUPPORT_APIC
   bx_ioapic_stub_c stubIOAPIC;
 #endif
+#if BX_SUPPORT_GAMEPORT
+  bx_game_stub_c stubGameport;
+#endif
 #if BX_SUPPORT_PCIUSB
   bx_usb_devctl_stub_c stubUsbDevCtl;
 #endif
 #if BX_SUPPORT_SOUNDLOW
   bx_soundmod_ctl_stub_c  stubSoundModCtl;
+#endif
+#if BX_NETWORKING
+  bx_netmod_ctl_stub_c  stubNetModCtl;
 #endif
 
   // Some info to pass to devices which can handled bulk IO.  This allows
@@ -546,6 +594,7 @@ private:
   bx_bool is_parallel_enabled();
   bx_bool is_usb_ohci_enabled();
   bx_bool is_usb_uhci_enabled();
+  bx_bool is_usb_xhci_enabled();
 };
 
 // memory stub has an assumption that there are no memory accesses splitting 4K page

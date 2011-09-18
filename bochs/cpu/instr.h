@@ -26,17 +26,69 @@
 
 class bxInstruction_c;
 
+typedef void BX_INSF_TYPE;
+
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+
+#define BX_SYNC_TIME_IF_SINGLE_PROCESSOR(allowed_delta) {                     \
+  if (BX_SMP_PROCESSORS == 1) {                                               \
+    Bit32s delta = BX_CPU_THIS_PTR icount - BX_CPU_THIS_PTR icount_last_sync; \
+    if (delta > allowed_delta) {                                              \
+      BX_CPU_THIS_PTR icount_last_sync = BX_CPU_THIS_PTR icount;              \
+      BX_TICKN(delta);                                                        \
+    }                                                                         \
+  }                                                                           \
+}
+
+#define BX_COMMIT_INSTRUCTION(i) {                     \
+  BX_CPU_THIS_PTR prev_rip = RIP; /* commit new RIP */ \
+  BX_INSTR_AFTER_EXECUTION(BX_CPU_ID, (i));            \
+  BX_CPU_THIS_PTR icount++;                            \
+}
+
+#define BX_EXECUTE_INSTRUCTION(i) {                    \
+  BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, (i));           \
+  RIP += (i)->ilen();                                  \
+  return BX_CPU_CALL_METHOD(i->execute, (i));          \
+}
+
+#define BX_NEXT_TRACE(i) {                             \
+  BX_COMMIT_INSTRUCTION(i);                            \
+  return;                                              \
+}
+
+#define BX_NEXT_INSTR(i) {                             \
+  BX_COMMIT_INSTRUCTION(i);                            \
+  if (BX_CPU_THIS_PTR async_event) return;             \
+  ++i;                                                 \
+  BX_EXECUTE_INSTRUCTION(i);                           \
+}
+
+#else // BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+
+#define BX_NEXT_TRACE(i) { return; }
+#define BX_NEXT_INSTR(i) { return; }
+
+#define BX_SYNC_TIME_IF_SINGLE_PROCESSOR(allowed_delta) \
+  if (BX_SMP_PROCESSORS == 1) BX_TICK1()
+
+#endif
+
 // <TAG-TYPE-EXECUTEPTR-START>
 #if BX_USE_CPU_SMF
-typedef void (BX_CPP_AttrRegparmN(1) *BxExecutePtr_tR)(bxInstruction_c *);
+typedef BX_INSF_TYPE (BX_CPP_AttrRegparmN(1) *BxExecutePtr_tR)(bxInstruction_c *);
 typedef bx_address (BX_CPP_AttrRegparmN(1) *BxResolvePtr_tR)(bxInstruction_c *);
+typedef void (BX_CPP_AttrRegparmN(1) *BxRepIterationPtr_tR)(bxInstruction_c *);
 #else
-typedef void (BX_CPU_C::*BxExecutePtr_tR)(bxInstruction_c *) BX_CPP_AttrRegparmN(1);
+typedef BX_INSF_TYPE (BX_CPU_C::*BxExecutePtr_tR)(bxInstruction_c *) BX_CPP_AttrRegparmN(1);
 typedef bx_address (BX_CPU_C::*BxResolvePtr_tR)(bxInstruction_c *) BX_CPP_AttrRegparmN(1);
+typedef void (BX_CPU_C::*BxRepIterationPtr_tR)(bxInstruction_c *) BX_CPP_AttrRegparmN(1);
 #endif
 // <TAG-TYPE-EXECUTEPTR-END>
 
 extern bx_address bx_asize_mask[];
+
+const char *get_bx_opcode_name(Bit16u ia_opcode);
 
 // <TAG-CLASS-INSTRUCTION-START>
 class bxInstruction_c {
@@ -50,8 +102,9 @@ public:
   BxResolvePtr_tR ResolveModrm;
 
   struct {
-    //  15.12 AVX vl  (0=no VL, 1=128 bit, 2=256 bit)
-    //  11..0 opcode
+    // 15..13 AVX vl  (0=no VL, 1=128 bit, 2=256 bit)
+    // 12..12 lock
+    // 11...0 opcode
     Bit16u ia_opcode;
 
     //  7...4 (unused)
@@ -104,6 +157,18 @@ public:
     } IqForm;
 #endif
   };
+
+#ifdef BX_INSTR_STORE_OPCODE_BYTES
+  Bit8u opcode_bytes[16];
+
+  BX_CPP_INLINE const Bit8u* get_opcode_bytes(void) const {
+    return opcode_bytes;
+  }
+
+  BX_CPP_INLINE void set_opcode_bytes(const Bit8u *opcode) {
+    memcpy(opcode_bytes, opcode, ilen());
+  }
+#endif
 
   BX_CPP_INLINE unsigned seg(void) const {
     return metaData[BX_INSTR_METADATA_SEG];
@@ -244,6 +309,9 @@ public:
   BX_CPP_INLINE void setIaOpcode(Bit16u op) {
     metaInfo.ia_opcode = (metaInfo.ia_opcode & 0xf000) | op;
   }
+  BX_CPP_INLINE const char* getIaOpcodeName(void) const {
+    return get_bx_opcode_name(getIaOpcode());
+  }
 
   BX_CPP_INLINE unsigned repUsedL(void) const {
     return metaInfo.metaInfo1 >> 6;
@@ -256,10 +324,14 @@ public:
   }
 
   BX_CPP_INLINE unsigned getVL(void) const {
-    return metaInfo.ia_opcode >> 12;
+#if BX_SUPPORT_AVX
+    return metaInfo.ia_opcode >> 13;
+#else
+    return 0;
+#endif
   }
   BX_CPP_INLINE void setVL(unsigned value) {
-    metaInfo.ia_opcode = (metaInfo.ia_opcode & 0xfff) | (value << 12);
+    metaInfo.ia_opcode = (metaInfo.ia_opcode & 0x1fff) | (value << 13);
   }
 
   BX_CPP_INLINE void setVvv(unsigned vvv) {
@@ -276,14 +348,21 @@ public:
     // it is quite common to be tested for.
     return metaInfo.metaInfo1 & (1<<4);
   }
-  BX_CPP_INLINE unsigned assertModC0()
+  BX_CPP_INLINE void assertModC0()
   {
-    return metaInfo.metaInfo1 |= (1<<4);
+    metaInfo.metaInfo1 |= (1<<4);
+  }
+
+  BX_CPP_INLINE unsigned lock() const
+  {
+    return metaInfo.ia_opcode & (1<<12);
+  }
+  BX_CPP_INLINE void assertLock()
+  {
+    metaInfo.ia_opcode |= (1<<12);
   }
 };
 // <TAG-CLASS-INSTRUCTION-END>
-
-const char *get_bx_opcode_name(Bit16u ia_opcode);
 
 enum {
 #define bx_define_opcode(a, b, c, d, e) a,

@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2009  The Bochs Project
+//  Copyright (C) 2001-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,7 @@
 //  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
 #include "bochs.h"
+#include "bxversion.h"
 #include "param_names.h"
 #include "gui/textconfig.h"
 #if BX_USE_TEXTCONFIG && defined(WIN32)
@@ -46,13 +47,8 @@
 #endif
 
 #if BX_WITH_CARBON
-#define Float32 KLUDGE_Float32
-#define Float64 KLUDGE_Float64
 #include <Carbon/Carbon.h>
-#undef Float32
-#undef Float64
 #endif
-
 
 extern "C" {
 #include <signal.h>
@@ -79,8 +75,10 @@ logfunctions *pluginlog = &thePluginLog;
 bx_startup_flags_t bx_startup_flags;
 bx_bool bx_user_quit;
 Bit8u bx_cpu_count;
+#if BX_SUPPORT_APIC
 Bit32u apic_id_mask; // determinted by XAPIC option
 bx_bool simulate_xapic;
+#endif
 
 /* typedefs */
 
@@ -115,9 +113,9 @@ void bx_print_header()
     bx_center_print(stdout, buffer, 72);
 #ifdef __DATE__
 #ifdef __TIME__
-    sprintf(buffer, "Compiled at %s, %s\n", __DATE__, __TIME__);
+    sprintf(buffer, "Compiled on %s at %s\n", __DATE__, __TIME__);
 #else
-    sprintf(buffer, "Compiled at %s\n", __DATE__);
+    sprintf(buffer, "Compiled on %s\n", __DATE__);
 #endif
     bx_center_print(stdout, buffer, 72);
 #endif
@@ -328,11 +326,7 @@ int bxmain (void) {
 #ifndef MAX_ARGLEN
 #define MAX_ARGLEN 80
 #endif
-int split_string_into_argv (
-  char *string,
-  int *argc_out,
-  char **argv,
-  int max_argv)
+int split_string_into_argv(char *string, int *argc_out, char **argv, int max_argv)
 {
   char *buf0 = new char[strlen(string)+1];
   strcpy (buf0, string);
@@ -504,8 +498,11 @@ void print_usage(void)
     "  -rc filename     execute debugger commands stored in file\n"
     "  -dbglog filename specify Bochs internal debugger log file name\n"
 #endif
-    "  --help           display this help and exit\n\n"
-    "For information on Bochs configuration file arguments, see the\n"
+    "  --help           display this help and exit\n"
+#if BX_CPU_LEVEL > 4
+    "  --help cpu       display supported CPU models and exit\n"
+#endif
+    "\nFor information on Bochs configuration file arguments, see the\n"
 #if (!defined(WIN32)) && !BX_WITH_MACOS
     "bochsrc section in the user documentation or the man page of bochsrc.\n");
 #else
@@ -536,7 +533,7 @@ int bx_init_main(int argc, char *argv[])
   SIM->get_param_enum(BXPN_BOCHS_START)->set(BX_RUN_START);
 
   // interpret the args that start with -, like -q, -f, etc.
-  int arg = 1, load_rcfile=1;
+  int arg = 1, load_rcfile=1, i = 0;
   while (arg < argc) {
     // parse next arg
     if (!strcmp("--help", argv[arg]) || !strncmp("-h", argv[arg], 2)
@@ -544,7 +541,22 @@ int bx_init_main(int argc, char *argv[])
         || !strncmp("/?", argv[arg], 2)
 #endif
        ) {
-      print_usage();
+#if BX_CPU_LEVEL > 4
+      if ((arg+1) < argc) {
+        if (!strcmp("cpu", argv[arg+1])) {
+          fprintf(stderr, "Supported CPU models:\n\n");
+          do {
+            fprintf(stderr, "%s\n", SIM->get_param_enum(BXPN_CPU_MODEL)->get_choice(i));
+          } while (i++ < SIM->get_param_enum(BXPN_CPU_MODEL)->get_max());
+          fprintf(stderr, "\n");
+          arg++;
+        }
+      }
+      else
+#endif
+      {
+        print_usage();
+      }
       SIM->quit_sim(0);
     }
     else if (!strcmp("-n", argv[arg])) {
@@ -800,10 +812,6 @@ bx_bool load_and_init_display_lib(void)
   if (!strcmp(gui_name, "amigaos"))
     PLUG_load_plugin (amigaos, PLUGTYPE_OPTIONAL);
 #endif
-#if BX_WITH_BEOS
-  if (!strcmp(gui_name, "beos"))
-    PLUG_load_plugin (beos, PLUGTYPE_OPTIONAL);
-#endif
 #if BX_WITH_CARBON
   if (!strcmp(gui_name, "carbon"))
     PLUG_load_plugin (carbon, PLUGTYPE_OPTIONAL);
@@ -874,11 +882,8 @@ int bx_begin_simulation (int argc, char *argv[])
                  SIM->get_param_num(BXPN_CPU_NCORES)->get() *
                  SIM->get_param_num(BXPN_CPU_NTHREADS)->get();
 
-#if BX_CPU_LEVEL >= 6
-  simulate_xapic = SIM->get_param_bool(BXPN_CPUID_XAPIC)->get();
-#else
-  simulate_xapic = 0;
-#endif
+#if BX_SUPPORT_APIC
+  simulate_xapic = (SIM->get_param_enum(BXPN_CPUID_APIC)->get() >= BX_CPUID_SUPPORT_XAPIC);
 
   // For P6 and Pentium family processors the local APIC ID feild is 4 bits
   // APIC_MAX_ID indicate broadcast so it can't be used as valid APIC ID
@@ -890,6 +895,7 @@ int bx_begin_simulation (int argc, char *argv[])
     BX_PANIC(("cpu: too many SMP threads defined, only %u threads supported by %sAPIC",
       max_smp_threads, simulate_xapic ? "x" : "legacy "));
   }
+#endif
 
   BX_ASSERT(bx_cpu_count > 0);
 
@@ -940,6 +946,7 @@ int bx_begin_simulation (int argc, char *argv[])
       // for one processor, the only reason for cpu_loop to return is
       // that kill_bochs_request was set by the GUI interface.
     }
+#if BX_SUPPORT_SMP
     else {
       // SMP simulation: do a few instructions on each processor, then switch
       // to another.  Increasing quantum speeds up overall performance, but
@@ -956,6 +963,7 @@ int bx_begin_simulation (int argc, char *argv[])
           BX_TICKN(quantum);
       }
     }
+#endif /* BX_SUPPORT_SMP */
   }
 #endif /* BX_DEBUGGER == 0 */
   BX_INFO(("cpu loop quit, shutting down simulator"));
@@ -1005,86 +1013,111 @@ void bx_init_hardware()
 
   io->set_log_prefix(SIM->get_param_string(BXPN_LOG_PREFIX)->getptr());
 
-#if BX_CPU_LEVEL >= 5
-  bx_bool mmx_enabled = SIM->get_param_bool(BXPN_CPUID_MMX)->get();
-#endif
-#if BX_CPU_LEVEL >= 6
-  bx_bool aes_enabled = SIM->get_param_bool(BXPN_CPUID_AES)->get();
-  bx_bool movbe_enabled = SIM->get_param_bool(BXPN_CPUID_MOVBE)->get();
-  bx_bool sep_enabled = SIM->get_param_bool(BXPN_CPUID_SEP)->get();
-  bx_bool xsave_enabled = SIM->get_param_bool(BXPN_CPUID_XSAVE)->get();
-#if BX_SUPPORT_X86_64
-  bx_bool xlarge_pages_enabled = SIM->get_param_bool(BXPN_CPUID_1G_PAGES)->get();
-#endif
-#if BX_SUPPORT_MONITOR_MWAIT
-  bx_bool mwait_enabled = SIM->get_param_bool(BXPN_CPUID_MWAIT)->get();
-#endif
-#endif
-
   // Output to the log file the cpu and device settings
   // This will by handy for bug reports
   BX_INFO(("Bochs x86 Emulator %s", VER_STRING));
   BX_INFO(("  %s", REL_STRING));
 #ifdef __DATE__
 #ifdef __TIME__
-  BX_INFO(("Compiled at %s, %s", __DATE__, __TIME__));
+  BX_INFO(("Compiled on %s at %s", __DATE__, __TIME__));
 #else
-  BX_INFO(("Compiled at %s", __DATE__));
+  BX_INFO(("Compiled on %s", __DATE__));
 #endif
 #endif
   BX_INFO(("System configuration"));
   BX_INFO(("  processors: %d (cores=%u, HT threads=%u)", BX_SMP_PROCESSORS,
     SIM->get_param_num(BXPN_CPU_NCORES)->get(), SIM->get_param_num(BXPN_CPU_NTHREADS)->get()));
-  BX_INFO(("  A20 line support: %s",BX_SUPPORT_A20?"yes":"no"));
+  BX_INFO(("  A20 line support: %s", BX_SUPPORT_A20?"yes":"no"));
 #if BX_CONFIGURE_MSRS
   const char *msrs_file = SIM->get_param_string(BXPN_CONFIGURABLE_MSRS_PATH)->getptr();
   if(strlen(msrs_file) > 0)
     BX_INFO(("  load configurable MSRs from file \"%s\"", msrs_file));
 #endif
+  BX_INFO(("IPS is set to %d", (Bit32u) SIM->get_param_num(BXPN_IPS)->get()));
   BX_INFO(("CPU configuration"));
-  BX_INFO(("  level: %d",BX_CPU_LEVEL));
+  BX_INFO(("  level: %d", BX_CPU_LEVEL));
 #if BX_SUPPORT_SMP
   BX_INFO(("  SMP support: yes, quantum=%d", SIM->get_param_num(BXPN_SMP_QUANTUM)->get()));
 #else
   BX_INFO(("  SMP support: no"));
 #endif
-  BX_INFO(("  APIC support: %s",BX_SUPPORT_APIC?"yes":"no"));
-  BX_INFO(("  FPU support: %s",BX_SUPPORT_FPU?"yes":"no"));
+
+  unsigned cpu_model = SIM->get_param_enum(BXPN_CPU_MODEL)->get();
+  if (! cpu_model) {
 #if BX_CPU_LEVEL >= 5
-  BX_INFO(("  MMX support: %s",mmx_enabled?"yes":"no"));
-  BX_INFO(("  3dnow! support: %s",BX_SUPPORT_3DNOW?"yes":"no"));
+    bx_bool mmx_enabled = SIM->get_param_bool(BXPN_CPUID_MMX)->get();
 #endif
 #if BX_CPU_LEVEL >= 6
-  BX_INFO(("  SEP support: %s",sep_enabled?"yes":"no"));
-  BX_INFO(("  SSE support: %s", SIM->get_param_enum(BXPN_CPUID_SSE)->get_selected()));
-  BX_INFO(("  XSAVE support: %s",xsave_enabled?"yes":"no"));
-  BX_INFO(("  AES support: %s",aes_enabled?"yes":"no"));
-  BX_INFO(("  MOVBE support: %s",movbe_enabled?"yes":"no"));
-  BX_INFO(("  x86-64 support: %s",BX_SUPPORT_X86_64?"yes":"no"));
+    bx_bool sse4a_enabled = SIM->get_param_bool(BXPN_CPUID_SSE4A)->get();
+    bx_bool aes_enabled = SIM->get_param_bool(BXPN_CPUID_AES)->get();
+    bx_bool movbe_enabled = SIM->get_param_bool(BXPN_CPUID_MOVBE)->get();
+    bx_bool sep_enabled = SIM->get_param_bool(BXPN_CPUID_SEP)->get();
+    bx_bool xsave_enabled = SIM->get_param_bool(BXPN_CPUID_XSAVE)->get();
+    bx_bool xsaveopt_enabled = SIM->get_param_bool(BXPN_CPUID_XSAVEOPT)->get();
+#if BX_SUPPORT_AVX
+    unsigned avx_enabled = SIM->get_param_num(BXPN_CPUID_AVX)->get();
+#endif
 #if BX_SUPPORT_X86_64
-  BX_INFO(("  1G paging support: %s",xlarge_pages_enabled?"yes":"no"));
+    bx_bool xlarge_pages_enabled = SIM->get_param_bool(BXPN_CPUID_1G_PAGES)->get();
 #endif
 #if BX_SUPPORT_MONITOR_MWAIT
-  BX_INFO(("  MWAIT support: %s",mwait_enabled?"yes":"no"));
+    bx_bool mwait_enabled = SIM->get_param_bool(BXPN_CPUID_MWAIT)->get();
 #endif
-  BX_INFO(("  AVX support: %s",BX_SUPPORT_AVX?"yes":"no"));
-#if BX_SUPPORT_VMX
-  BX_INFO(("  VMX support: %d",BX_SUPPORT_VMX));
+#endif
+
+#if BX_CPU_LEVEL >= 5
+    BX_INFO(("  APIC support: %s", SIM->get_param_enum(BXPN_CPUID_APIC)->get_selected()));
 #else
-  BX_INFO(("  VMX support: no"));
+    BX_INFO(("  APIC support: no"));
+#endif
+    BX_INFO(("  FPU support: %s", BX_SUPPORT_FPU?"yes":"no"));
+#if BX_CPU_LEVEL >= 5
+    BX_INFO(("  MMX support: %s", mmx_enabled?"yes":"no"));
+    BX_INFO(("  3dnow! support: %s", BX_SUPPORT_3DNOW?"yes":"no"));
+#endif
+#if BX_CPU_LEVEL >= 6
+    BX_INFO(("  SEP support: %s", sep_enabled?"yes":"no"));
+    BX_INFO(("  SSE support: %s%s", SIM->get_param_enum(BXPN_CPUID_SSE)->get_selected(),
+      sse4a_enabled ? "+sse4a" : ""));
+    BX_INFO(("  XSAVE support: %s %s",
+      xsave_enabled?"xsave":"no", xsaveopt_enabled?"xsaveopt":""));
+    BX_INFO(("  AES support: %s", aes_enabled?"yes":"no"));
+    BX_INFO(("  MOVBE support: %s", movbe_enabled?"yes":"no"));
+    BX_INFO(("  x86-64 support: %s", BX_SUPPORT_X86_64?"yes":"no"));
+#if BX_SUPPORT_X86_64
+    BX_INFO(("  1G paging support: %s", xlarge_pages_enabled?"yes":"no"));
+#endif
+#if BX_SUPPORT_MONITOR_MWAIT
+    BX_INFO(("  MWAIT support: %s", mwait_enabled?"yes":"no"));
+#endif
+#if BX_SUPPORT_AVX
+    if (avx_enabled)
+      BX_INFO(("  AVX support: %d", avx_enabled));
+    else
+      BX_INFO(("  AVX support: no"));
+#endif
+#if BX_SUPPORT_VMX
+    BX_INFO(("  VMX support: %d", BX_SUPPORT_VMX));
+#else
+    BX_INFO(("  VMX support: no"));
 #endif
 #endif
+  }
+  else {
+    BX_INFO(("  Using pre-defined CPU configuration: %s",
+      SIM->get_param_enum(BXPN_CPU_MODEL)->get_selected()));
+  }
+
   BX_INFO(("Optimization configuration"));
-  BX_INFO(("  RepeatSpeedups support: %s",BX_SupportRepeatSpeedups?"yes":"no"));
-  BX_INFO(("  Trace cache support: %s",BX_SUPPORT_TRACE_CACHE?"yes":"no"));
-  BX_INFO(("  Fast function calls: %s",BX_FAST_FUNC_CALL?"yes":"no"));
+  BX_INFO(("  RepeatSpeedups support: %s", BX_SUPPORT_REPEAT_SPEEDUPS?"yes":"no"));
+  BX_INFO(("  Fast function calls: %s", BX_FAST_FUNC_CALL?"yes":"no"));
+  BX_INFO(("  Handlers Chaining speedups: %s", BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS?"yes":"no"));
   BX_INFO(("Devices configuration"));
-  BX_INFO(("  ACPI support: %s",BX_SUPPORT_ACPI?"yes":"no"));
-  BX_INFO(("  NE2000 support: %s",BX_SUPPORT_NE2K?"yes":"no"));
-  BX_INFO(("  PCI support: %s, enabled=%s",BX_SUPPORT_PCI?"yes":"no",
+  BX_INFO(("  NE2000 support: %s", BX_SUPPORT_NE2K?"yes":"no"));
+  BX_INFO(("  PCI support: %s, enabled=%s", BX_SUPPORT_PCI?"yes":"no",
     SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get() ? "yes" : "no"));
-  BX_INFO(("  SB16 support: %s",BX_SUPPORT_SB16?"yes":"no"));
-  BX_INFO(("  USB support: %s",BX_SUPPORT_PCIUSB?"yes":"no"));
+  BX_INFO(("  SB16 support: %s", BX_SUPPORT_SB16?"yes":"no"));
+  BX_INFO(("  USB support: %s", BX_SUPPORT_PCIUSB?"yes":"no"));
   BX_INFO(("  VGA extension support: vbe %s", BX_SUPPORT_CLGD54XX?"cirrus":""));
 
   // Check if there is a romimage
@@ -1114,10 +1147,9 @@ void bx_init_hardware()
 
   BX_MEM(0)->init_memory(memSize, hostMemSize);
 
-  // First load the BIOS and VGABIOS
+  // First load the system BIOS (VGABIOS loading moved to the vga code)
   BX_MEM(0)->load_ROM(SIM->get_param_string(BXPN_ROM_PATH)->getptr(),
                       SIM->get_param_num(BXPN_ROM_ADDRESS)->get(), 0);
-  BX_MEM(0)->load_ROM(SIM->get_param_string(BXPN_VGA_ROM_PATH)->getptr(), 0xc0000, 1);
 
   // Then load the optional ROM images
   if (strcmp(SIM->get_param_string(BXPN_OPTROM1_PATH)->getptr(), "") !=0)
@@ -1279,6 +1311,7 @@ void CDECL bx_signal_handler(int signum)
       if (bx_dbg.print_timestamps) {
         printf("IPS: %u\taverage = %u\t\t(%us)\n",
            (unsigned) ips_count, (unsigned) (ticks_count/counts), (unsigned) counts);
+        fflush(stdout);
       }
     }
 #if !defined(WIN32)

@@ -36,7 +36,6 @@
 #   x              use X windows interface, cross platform
 #   win32          use native win32 libraries
 #   carbon         use Carbon library (for MacOS X)
-#   beos           use native BeOS libraries
 #   macintosh      use MacOS pre-10
 #   amigaos        use native AmigaOS libraries
 #   sdl            use SDL library, cross platform
@@ -54,7 +53,6 @@
 # behaviour. See the examples below for currently supported options.
 #=======================================================================
 #display_library: amigaos
-#display_library: beos
 #display_library: carbon
 #display_library: macintosh
 #display_library: nogui
@@ -80,142 +78,187 @@
 # Bochs. The start address optional, since it can be calculated from image size.
 #=======================================================================
 romimage: file=$BXSHARE/BIOS-bochs-latest 
-#romimage: file=bios/seabios-0.5.1.bin
+#romimage: file=bios/seabios-0.6.1.bin
 #romimage: file=mybios.bin, address=0xfff80000 # 512k at memory top
 
 #=======================================================================
 # CPU:
 # This defines cpu-related parameters inside Bochs:
 #
+#  MODEL:
+#    Selects CPU configuration to emulate from pre-defined list of all
+#    supported configurations. When this option is used, the CPUID option
+#    has no effect anymore.
+#
+#  CPU configurations that can be selected:
+# -----------------------------------------------------------------
+#  pentium_mmx                Intel Pentium MMX
+#  amd_k6_2_chomper           AMD-K6(tm) 3D processor (Chomper)
+#  p2_klamath                 Intel Pentium II (Klamath)
+#  p3_katmai                  Intel Pentium III (Katmai)
+#  p4_willamette              Intel(R) Pentium(R) 4 (Willamette)
+#  core_duo_t2400_yonah       Intel(R) Core(TM) Duo CPU T2400
+#  atom_n270                  Intel(R) Atom(TM) CPU N270
+#  athlon64_clawhammer        AMD Athlon(tm) 64 Processor 2800+
+#  p4_prescott_celeron_336    Intel(R) Celeron(R) 336
+#  core2_extreme_x9770        Intel(R) Core(TM)2 Extreme X9770
+#  core2_penryn_t9600         Intel Mobile Core 2 Duo T9600
+#  corei7_sandy_bridge_2600k  Intel(R) Core(TM) i7-2600K
+#
 #  COUNT:
-#  Set the number of processors:cores per processor:threads per core 
-#  when Bochs is compiled for SMP emulation.
-#  Bochs currently supports up to 8 threads running simultaniosly. 
-#  If Bochs is compiled without SMP support, it won't accept values 
-#  different from 1.
+#    Set the number of processors:cores per processor:threads per core 
+#    when Bochs is compiled for SMP emulation.
+#    Bochs currently supports up to 8 threads running simultaniosly. 
+#    If Bochs is compiled without SMP support, it won't accept values 
+#    different from 1.
 #
 #  QUANTUM:
-#  Maximum amount of instructions allowed to execute by processor before
-#  returning control to another cpu. This option exists only in Bochs 
-#  binary compiled with SMP support.
+#    Maximum amount of instructions allowed to execute by processor before
+#    returning control to another cpu. This option exists only in Bochs 
+#    binary compiled with SMP support.
 #
 #  RESET_ON_TRIPLE_FAULT:
-#  Reset the CPU when triple fault occur (highly recommended) rather than
-#  PANIC. Remember that if you trying to continue after triple fault the 
-#  simulation will be completely bogus !
+#    Reset the CPU when triple fault occur (highly recommended) rather than
+#    PANIC. Remember that if you trying to continue after triple fault the 
+#    simulation will be completely bogus !
+#
+#  CPUID_LIMIT_WINNT:
+#    Determine whether to limit maximum CPUID function to 2. This mode is
+#    required to workaround WinNT installation and boot issues.
 #
 #  MSRS:
-#  Define path to user CPU Model Specific Registers (MSRs) specification.
-#  See example in msrs.def.
+#    Define path to user CPU Model Specific Registers (MSRs) specification.
+#    See example in msrs.def.
 #
 #  IGNORE_BAD_MSRS:
-#  Ignore MSR references that Bochs does not understand; print a warning
-#  message instead of generating #GP exception. This option is enabled
-#  by default but will not be avaiable if configurable MSRs are enabled.
+#    Ignore MSR references that Bochs does not understand; print a warning
+#    message instead of generating #GP exception. This option is enabled
+#    by default but will not be avaiable if configurable MSRs are enabled.
 #
 #  IPS:
-#  Emulated Instructions Per Second. This is the number of IPS that bochs
-#  is capable of running on your machine. You can recompile Bochs with
-#  --enable-show-ips option enabled, to find your host's capability.
-#  Measured IPS value will then be logged into your log file or shown
-#  in the status bar (if supported by the gui).
+#    Emulated Instructions Per Second. This is the number of IPS that bochs
+#    is capable of running on your machine. You can recompile Bochs with
+#    --enable-show-ips option enabled, to find your host's capability.
+#    Measured IPS value will then be logged into your log file or shown
+#    in the status bar (if supported by the gui).
 #
-#  IPS is used to calibrate many time-dependent events within the bochs 
-#  simulation.  For example, changing IPS affects the frequency of VGA
-#  updates, the duration of time before a key starts to autorepeat, and
-#  the measurement of BogoMips and other benchmarks.
+#    IPS is used to calibrate many time-dependent events within the bochs 
+#    simulation.  For example, changing IPS affects the frequency of VGA
+#    updates, the duration of time before a key starts to autorepeat, and
+#    the measurement of BogoMips and other benchmarks.
 #
 #  Examples:
 #
 #  Bochs Machine/Compiler                                 Mips
-# ____________________________________________________________________
-#  2.3.7 3.2Ghz Intel Core 2 Q9770 with WinXP/g++ 3.4    50 to 55 Mips
-#  2.3.7 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4      38 to 43 Mips
-#  2.2.6 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4      21 to 25 Mips
-#  2.2.6 2.1Ghz Athlon XP with Linux 2.6/g++ 3.4         12 to 15 Mips
-#  2.0.1 1.6Ghz Intel P4 with Win2000/g++ 3.3             5 to  7 Mips
+# ______________________________________________________________________
+#  2.4.6 3.4Ghz Intel Core i7 2600 with Win7x64/g++ 4.5.2 85 to 95 Mips
+#  2.3.7 3.2Ghz Intel Core 2 Q9770 with WinXP/g++ 3.4     50 to 55 Mips
+#  2.3.7 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4       38 to 43 Mips
+#  2.2.6 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4       21 to 25 Mips
+#  2.2.6 2.1Ghz Athlon XP with Linux 2.6/g++ 3.4          12 to 15 Mips
 #=======================================================================
 cpu: count=1, ips=50000000, reset_on_triple_fault=1, ignore_bad_msrs=1, msrs="msrs.def"
+cpu: cpuid_limit_winnt=0
 
 #=======================================================================
 # CPUID:
 #
-# This defines features and functionality supported by Bochs emulated CPU:
+# This defines features and functionality supported by Bochs emulated CPU.
+# The option has no offect if CPU model was selected in CPU option.
 #
 #  MMX:
-#  Select MMX instruction set support.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
+#    Select MMX instruction set support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
+#
+#  APIC:
+#    Select APIC configuration (LEGACY/XAPIC/X2APIC).
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
 #
 #  SEP:
-#  Select SYSENTER/SYSEXIT instruction set support.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#    Select SYSENTER/SYSEXIT instruction set support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
 #  SSE:
-#  Select SSE instruction set support.
-#  Any of NONE/SSE/SSE2/SSE3/SSSE3/SSE4_1/SSE4_2 could be selected.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#    Select SSE instruction set support.
+#    Any of NONE/SSE/SSE2/SSE3/SSSE3/SSE4_1/SSE4_2 could be selected.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
-#  XAPIC:
-#  Select XAPIC extensions support.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#  SSE4A:
+#    Select AMD SSE4A instructions support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
 #  AES:
-#  Select AES instruction set support.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#    Select AES instruction set support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
 #  MOVBE:
-#  Select MOVBE Intel(R) Atom instruction support.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#    Select MOVBE Intel(R) Atom instruction support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
 #  XSAVE:
-#  Select XSAVE extensions support.
-#  This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#    Select XSAVE extensions support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#
+#  XSAVEOPT:
+#    Select XSAVEOPT instruction support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#
+#  AVX:
+#    Select AVX/AVX2 instruction set support.
+#    This option exists only if Bochs compiled with --enable-avx option.
+#
+#  AVX_F16C:
+#    Select AVX float16 convert instructions support.
+#    This option exists only if Bochs compiled with --enable-avx option.
+#
+#  BMI:
+#    Select BMI1/BMI2 instructions support.
+#    This option exists only if Bochs compiled with --enable-avx option.
 #
 #  1G_PAGES:
-#  Enable 1G page size support in long mode.
-#  This option exists only if Bochs compiled with x86-64 support.
+#    Enable 1G page size support in long mode.
+#    This option exists only if Bochs compiled with x86-64 support.
 #
 #  PCID:
-#  Enable Process-Context Identifiers (PCID) support in long mode.
-#  This option exists only if Bochs compiled with x86-64 support.
+#    Enable Process-Context Identifiers (PCID) support in long mode.
+#    This option exists only if Bochs compiled with x86-64 support.
 #
 #  FSGSBASE:
-#  Enable GS/GS BASE access instructions support in long mode.
-#  This option exists only if Bochs compiled with x86-64 support.
+#    Enable GS/GS BASE access instructions support in long mode.
+#    This option exists only if Bochs compiled with x86-64 support.
+#
+#  SMEP:
+#    Enable Supervisor Mode Execution Protection (SMEP) support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
 #  MWAIT:
-#  Select MONITOR/MWAIT instructions support.
-#  This option exists only if Bochs compiled with --enable-monitor-mwait.
+#    Select MONITOR/MWAIT instructions support.
+#    This option exists only if Bochs compiled with --enable-monitor-mwait.
 #
 #  MWAIT_IS_NOP:
-#  When this option is enabled MWAIT will not put the CPU into a sleep state.
-#  This option exists only if Bochs compiled with --enable-monitor-mwait.
+#    When this option is enabled MWAIT will not put the CPU into a sleep state.
+#    This option exists only if Bochs compiled with --enable-monitor-mwait.
 #
 #  VENDOR_STRING:
-#  Set the CPUID vendor string returned by CPUID(0x0). This should be a
-#  twelve-character ASCII string.  
+#    Set the CPUID vendor string returned by CPUID(0x0). This should be a
+#    twelve-character ASCII string.  
 #
 #  BRAND_STRING:
-#  Set the CPUID vendor string returned by CPUID(0x80000002 .. 0x80000004).  
-#  This should be at most a forty-eight-character ASCII string.  
+#    Set the CPUID vendor string returned by CPUID(0x80000002 .. 0x80000004).  
+#    This should be at most a forty-eight-character ASCII string.  
 #
 #  FAMILY:
-#  Set model information returned by CPUID. Default family value determined
-#  by configure option --enable-cpu-level.
+#    Set model information returned by CPUID. Default family value determined
+#    by configure option --enable-cpu-level.
 #
 #  MODEL:
-#  Set model information returned by CPUID. Default model value is 3.
+#    Set model information returned by CPUID. Default model value is 3.
 #
 #  STEPPING:
-#  Set stepping information returned by CPUID. Default stepping value is 3.
-#
-#  CPUID_LIMIT_WINNT:
-#  Determine whether to limit maximum CPUID function to 3. This mode is
-#  required to workaround WinNT installation and boot issues.
+#    Set stepping information returned by CPUID. Default stepping value is 3.
 #=======================================================================
-cpuid: mmx=1, sep=1, sse=sse4_2, xapic=1, aes=1, movbe=1, xsave=1
-cpuid: family=6, model=0x1a, stepping=5
-cpuid: cpuid_limit_winnt=0
+#cpuid: mmx=1, sep=1, sse=sse4_2, apic=xapic, aes=1, movbe=1, xsave=1
+#cpuid: family=6, model=0x1a, stepping=5
 
 #=======================================================================
 # MEMORY
@@ -267,12 +310,25 @@ vgaromimage: file=$BXSHARE/VGABIOS-lgpl-latest
 
 #=======================================================================
 # VGA:
-# Here you can specify the display extension to be used. With the value
-# 'none' you can use standard VGA with no extension. Other supported
-# values are 'vbe' for Bochs VBE and 'cirrus' for Cirrus SVGA support.
+# This defines parameters related to the VGA display
+#
+#   EXTENSION
+#     Here you can specify the display extension to be used. With the value
+#     'none' you can use standard VGA with no extension. Other supported
+#     values are 'vbe' for Bochs VBE and 'cirrus' for Cirrus SVGA support.
+#
+#   UPDATE_FREQ
+#     The VGA update frequency is based on the emulated clock and the default
+#     value is 5. Keep in mind that you must tweak the 'cpu: ips=N' directive
+#     to be as close to the number of emulated instructions-per-second your
+#     workstation can do, for this to be accurate. If the realtime sync is
+#     enabled with the 'clock' option, the value is based on the real time.
+#     This parameter can be changed at runtime.
+#
+# Examples:
+#   vga: extension=cirrus, update_freq: 10
 #=======================================================================
-#vga: extension=cirrus
-vga: extension=vbe
+#vga: extension=vbe, update_freq=5
 
 #=======================================================================
 # FLOPPYA:
@@ -516,7 +572,6 @@ panic: action=ask
 error: action=report
 info: action=report
 debug: action=ignore
-#pass: action=fatal
 
 #=======================================================================
 # DEBUGGER_LOG:
@@ -637,22 +692,6 @@ parport1: enabled=1, file="parport.out"
 #es1370: enabled=1, wavedev=alsa
 
 #=======================================================================
-# VGA_UPDATE_INTERVAL:
-# Video memory is scanned for updates and screen updated every so many
-# virtual seconds.  The default is 50000, about 20Hz. Keep in mind that
-# you must tweak the 'cpu: ips=N' directive to be as close to the number
-# of emulated instructions-per-second your workstation can do, for this
-# to be accurate.
-#
-# Examples:
-#   vga_update_interval: 250000
-#=======================================================================
-vga_update_interval: 300000
-
-# using for Winstone '98 tests
-#vga_update_interval:  100000
-
-#=======================================================================
 # KEYBOARD_SERIAL_DELAY:
 # Approximate time in microseconds that it takes one character to
 # be transfered from the keyboard to controller over the serial path.
@@ -768,7 +807,6 @@ private_colormap: enabled=0
 # If you don't want to make connections to any physical networks,
 # you can use the following 'ethmod's to simulate a virtual network.
 #   null: All packets are discarded, but logged to a few files.
-#   arpback: ARP is simulated. Disabled by default.
 #   vde:  Virtual Distributed Ethernet
 #   vnet: ARP, ICMP-echo(ping), DHCP and read/write TFTP are simulated.
 #         The virtual host uses 192.168.10.1.
@@ -839,16 +877,16 @@ keyboard_mapping: enabled=0, map=
 #user_shortcut: keys=ctrl-alt-del
 
 #=======================================================================
-# I440FXSUPPORT:
-# This option controls the presence of the i440FX PCI chipset. You can
-# also specify the devices connected to PCI slots. Up to 5 slots are
-# available now. These devices are currently supported: cirrus, es1370, ne2k,
-# pcivga, pcidev, pcipnic and usb_ohci.
+# PCI:
+# This option controls the presence of a PCI chipset in Bochs. Currently it only
+# supports the i440FX chipset. You can also specify the devices connected to
+# PCI slots. Up to 5 slots are available. These devices are currently supported:
+# cirrus, es1370, ne2k, pcivga, pcidev, pcipnic, usb_ohci and usb_xhci.
 #
 # Example:
-#   i440fxsupport: enabled=1, slot1=pcivga, slot2=ne2k
+#   pci: enabled=1, chipset=i440fx, slot1=pcivga, slot2=ne2k
 #=======================================================================
-i440fxsupport: enabled=1
+pci: enabled=1, chipset=i440fx
 
 #=======================================================================
 # USB_UHCI:
@@ -900,6 +938,15 @@ i440fxsupport: enabled=1
 #=======================================================================
 #usb_ohci: enabled=1
 #usb_ohci: enabled=1, port1=printer:usbprinter.bin
+
+#=======================================================================
+# USB_XHCI:
+# This option controls the presence of the experimental USB xHCI host controller
+# with a 4-port hub. The portX option accepts the same device types with the
+# same syntax as the UHCI controller (see above). The xHCI HC must be assigned
+# to a PCI slot.
+#=======================================================================
+#usb_xhci: enabled=1
 
 #=======================================================================
 # CMOSIMAGE:
@@ -956,7 +1003,6 @@ i440fxsupport: enabled=1
 #=======================================================================
 #load32bitOSImage: os=nullkernel, path=../kernel.img, iolog=../vga_io.log
 #load32bitOSImage: os=linux, path=../linux.img, iolog=../vga_io.log, initrd=../initrd.img
-#text_snapshot_check: enabled=1
 #print_timestamps: enabled=1
 
 #-------------------------

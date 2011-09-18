@@ -145,6 +145,7 @@ usb_msd_device_c::usb_msd_device_c(usbdev_type type, const char *filename)
   d.type = type;
   d.maxspeed = USB_SPEED_FULL;
   d.speed = d.maxspeed;
+  // TODO: d.max_packet_size = ???
   memset((void*)&s, 0, sizeof(s));
   if (d.type == USB_DEV_TYPE_DISK) {
     strcpy(d.devname, "BOCHS USB HARDDRIVE");
@@ -192,6 +193,7 @@ usb_msd_device_c::~usb_msd_device_c(void)
     delete s.scsi_dev;
   if (s.hdimage != NULL) {
     delete s.hdimage;
+#ifdef LOWLEVEL_CDROM
   } else if (s.cdrom != NULL) {
     delete s.cdrom;
 #if BX_WITH_WX
@@ -200,6 +202,7 @@ usb_msd_device_c::~usb_msd_device_c(void)
 #endif
     bx_list_c *usb_rt = (bx_list_c*)SIM->get_param(BXPN_MENU_RUNTIME_USB);
     usb_rt->remove(s.config->get_name());
+#endif
   }
 }
 
@@ -224,7 +227,8 @@ bx_bool usb_msd_device_c::init()
     }
     sprintf(s.info_txt, "USB HD: path='%s', mode='%s'", s.fname, hdimage_mode_names[s.image_mode]);
   } else if (d.type == USB_DEV_TYPE_CDROM) {
-    s.cdrom = new LOWLEVEL_CDROM(s.fname);
+#ifdef LOWLEVEL_CDROM
+    s.cdrom = DEV_hdimage_init_cdrom(s.fname);
     if (!s.cdrom->insert_cdrom()) {
       BX_ERROR(("could not open cdrom image file '%s'", s.fname));
       return 0;
@@ -232,6 +236,10 @@ bx_bool usb_msd_device_c::init()
       s.scsi_dev = new scsi_device_t(s.cdrom, 0, usb_msd_command_complete, (void*)this);
     }
     sprintf(s.info_txt, "USB CD: path='%s'", s.fname);
+#else
+    BX_PANIC(("missing LOWLEVEL_CDROM support"));
+    return 0;
+#endif
   }
   s.scsi_dev->register_state(s.sr_list, "scsidev");
   s.mode = USB_MSDM_CBW;
@@ -641,6 +649,7 @@ void usb_msd_device_c::cancel_packet(USBPacket *p)
 
 void usb_msd_device_c::set_inserted(bx_bool value)
 {
+#ifdef LOWLEVEL_CDROM
   const char *path;
 
   if (value) {
@@ -653,6 +662,9 @@ void usb_msd_device_c::set_inserted(bx_bool value)
     s.cdrom->eject_cdrom();
   }
   s.scsi_dev->set_inserted(value);
+#else
+  SIM->get_param_bool("status", s.config)->set(0);
+#endif
 }
 
 bx_bool usb_msd_device_c::get_inserted()

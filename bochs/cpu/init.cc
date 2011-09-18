@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2009  The Bochs Project
+//  Copyright (C) 2001-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -27,12 +27,10 @@
 
 #include "param_names.h"
 
-#if BX_SUPPORT_X86_64==0
-// Make life easier merging cpu64 & cpu code.
-#define RIP EIP
-#endif
-
 BX_CPU_C::BX_CPU_C(unsigned id): bx_cpuid(id)
+#if BX_CPU_LEVEL >= 4
+   , cpuid(NULL)
+#endif
 #if BX_SUPPORT_APIC
    ,lapic (this, id)
 #endif
@@ -43,6 +41,9 @@ BX_CPU_C::BX_CPU_C(unsigned id): bx_cpuid(id)
   char buffer[16];
   sprintf(buffer, "CPU%x", bx_cpuid);
   put(buffer);
+
+  isa_extensions_bitmask = BX_SUPPORT_FPU ? BX_CPU_X87 : 0;
+  cpu_extensions_bitmask = 0;
 }
 
 #if BX_WITH_WX
@@ -147,12 +148,49 @@ static Bit64s cpu_param_handler(bx_param_c *param, int set, Bit64s val)
 
 #endif
 
+#if BX_CPU_LEVEL >= 4
+
+#include "generic_cpuid.h"
+
+#define bx_define_cpudb(model) \
+  extern bx_cpuid_t *create_ ##model##_cpuid(BX_CPU_C *cpu);
+
+#include "cpudb.h"
+
+#undef bx_define_cpudb
+
+static bx_cpuid_t *cpuid_factory(BX_CPU_C *cpu)
+{
+  unsigned cpu_model = SIM->get_param_enum(BXPN_CPU_MODEL)->get();
+
+#define bx_define_cpudb(model) \
+  case bx_cpudb_##model:       \
+    return create_ ##model##_cpuid(cpu);
+
+  switch(cpu_model) {
+#include "cpudb.h"
+  default:
+    return 0;
+  }
+#undef bx_define_cpudb
+}
+
+#endif
+
 // BX_CPU_C constructor
 void BX_CPU_C::initialize(void)
 {
   BX_CPU_THIS_PTR set_INTR(0);
 
-  init_isa_features_bitmask();
+#if BX_CPU_LEVEL >= 4
+  BX_CPU_THIS_PTR cpuid = cpuid_factory(this);
+  if (! BX_CPU_THIS_PTR cpuid)
+    BX_PANIC(("Failed to create CPUID module !"));
+
+  BX_CPU_THIS_PTR isa_extensions_bitmask = cpuid->get_isa_extensions_bitmask();
+  BX_CPU_THIS_PTR cpu_extensions_bitmask = cpuid->get_cpu_extensions_bitmask();
+#endif
+
   init_FetchDecodeTables(); // must be called after init_isa_features_bitmask()
 
 #if BX_CONFIGURE_MSRS
@@ -220,7 +258,7 @@ void BX_CPU_C::register_wx_state(void)
       DEFPARAM_NORMAL(CR0, cr0.val32);
       DEFPARAM_NORMAL(CR2, cr2);
       DEFPARAM_NORMAL(CR3, cr3);
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
       DEFPARAM_NORMAL(CR4, cr4.val32);
 #endif
 
@@ -312,16 +350,17 @@ void BX_CPU_C::register_state(void)
 
   sprintf(name, "cpu%d", BX_CPU_ID);
 
-  bx_list_c *cpu = new bx_list_c(SIM->get_bochs_root(), name, name, 60 + BX_GENERAL_REGISTERS);
+  bx_list_c *cpu = new bx_list_c(SIM->get_bochs_root(), name, name, 55 + BX_GENERAL_REGISTERS);
 
-  BXRS_PARAM_SPECIAL32(cpu, cpu_version, param_save_handler, param_restore_handler);
-  BXRS_PARAM_SPECIAL32(cpu, cpuid_std,   param_save_handler, param_restore_handler);
-  BXRS_PARAM_SPECIAL32(cpu, cpuid_ext,   param_save_handler, param_restore_handler);
   BXRS_HEX_PARAM_SIMPLE(cpu, isa_extensions_bitmask);
+  BXRS_HEX_PARAM_SIMPLE(cpu, cpu_extensions_bitmask);
   BXRS_DEC_PARAM_SIMPLE(cpu, cpu_mode);
   BXRS_HEX_PARAM_SIMPLE(cpu, activity_state);
   BXRS_HEX_PARAM_SIMPLE(cpu, inhibit_mask);
   BXRS_HEX_PARAM_SIMPLE(cpu, debug_trap);
+#if BX_DEBUGGER || BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+  BXRS_DEC_PARAM_SIMPLE(cpu, icount);
+#endif
 #if BX_SUPPORT_X86_64
   BXRS_HEX_PARAM_SIMPLE(cpu, RAX);
   BXRS_HEX_PARAM_SIMPLE(cpu, RBX);
@@ -364,11 +403,11 @@ void BX_CPU_C::register_state(void)
   BXRS_HEX_PARAM_FIELD(cpu, CR0, cr0.val32);
   BXRS_HEX_PARAM_FIELD(cpu, CR2, cr2);
   BXRS_HEX_PARAM_FIELD(cpu, CR3, cr3);
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   BXRS_HEX_PARAM_FIELD(cpu, CR4, cr4.val32);
 #endif
 #if BX_CPU_LEVEL >= 6
-  if (BX_CPU_SUPPORT_ISA_EXTENSION(BX_CPU_XSAVE)) {
+  if (BX_CPUID_SUPPORT_ISA_EXTENSION(BX_CPU_XSAVE)) {
     BXRS_HEX_PARAM_FIELD(cpu, XCR0, xcr0.val32);
   }
 #endif
@@ -444,8 +483,10 @@ void BX_CPU_C::register_state(void)
 #if BX_SUPPORT_APIC
   BXRS_HEX_PARAM_FIELD(MSR, apicbase, msr.apicbase);
 #endif
-#if BX_SUPPORT_X86_64
+#if BX_CPU_LEVEL >= 5
   BXRS_HEX_PARAM_FIELD(MSR, EFER, efer.val32);
+#endif
+#if BX_SUPPORT_X86_64
   BXRS_HEX_PARAM_FIELD(MSR,  star, msr.star);
   BXRS_HEX_PARAM_FIELD(MSR, lstar, msr.lstar);
   BXRS_HEX_PARAM_FIELD(MSR, cstar, msr.cstar);
@@ -527,7 +568,7 @@ void BX_CPU_C::register_state(void)
 #endif
 
 #if BX_CPU_LEVEL >= 6
-  if (BX_CPU_SUPPORT_ISA_EXTENSION(BX_CPU_SSE)) {
+  if (BX_CPUID_SUPPORT_ISA_EXTENSION(BX_CPU_SSE)) {
     bx_list_c *sse = new bx_list_c(cpu, "SSE", BX_VLMAX*2*BX_XMM_REGISTERS+1);
     BXRS_HEX_PARAM_FIELD(sse, mxcsr, mxcsr.mxcsr);
     for (n=0; n<BX_XMM_REGISTERS; n++) {
@@ -544,9 +585,8 @@ void BX_CPU_C::register_state(void)
 #endif
 
 #if BX_SUPPORT_MONITOR_MWAIT
-  bx_list_c *monitor_list = new bx_list_c(cpu, "MONITOR", 3);
-  BXRS_HEX_PARAM_FIELD(monitor_list, begin_addr, monitor.monitor_begin);
-  BXRS_HEX_PARAM_FIELD(monitor_list, end_addr,   monitor.monitor_end);
+  bx_list_c *monitor_list = new bx_list_c(cpu, "MONITOR", 2);
+  BXRS_HEX_PARAM_FIELD(monitor_list, monitor_addr, monitor.monitor_addr);
   BXRS_PARAM_BOOL(monitor_list, armed, monitor.armed);
 #endif
 
@@ -563,6 +603,8 @@ void BX_CPU_C::register_state(void)
 
 #if BX_X86_DEBUGGER
   BXRS_PARAM_BOOL(cpu, in_repeat, in_repeat);
+  // for debug only (no need for save/restore), calculated in prefetch()
+  BXRS_PARAM_BOOL(cpu, codebp, codebp);
 #endif
 
   BXRS_PARAM_BOOL(cpu, in_smm, in_smm);
@@ -572,7 +614,6 @@ void BX_CPU_C::register_state(void)
   BXRS_PARAM_BOOL(cpu, pending_NMI, pending_NMI);
   BXRS_PARAM_BOOL(cpu, disable_INIT, disable_INIT);
   BXRS_PARAM_BOOL(cpu, pending_INIT, pending_INIT);
-  BXRS_PARAM_BOOL(cpu, trace, trace);
 }
 
 Bit64s BX_CPU_C::param_save_handler(void *devptr, bx_param_c *param)
@@ -592,13 +633,7 @@ Bit64s BX_CPU_C::param_save(bx_param_c *param)
   Bit64s val = 0;
 
   pname = param->get_name();
-  if (!strcmp(pname, "cpu_version")) {
-    val = get_cpu_version_information();
-  } else if (!strcmp(pname, "cpuid_std")) {
-    val = get_std_cpuid_features();
-  } else if (!strcmp(pname, "cpuid_ext")) {
-    val = get_extended_cpuid_features();
-  } else if (!strcmp(pname, "EFLAGS")) {
+  if (!strcmp(pname, "EFLAGS")) {
     val = BX_CPU_THIS_PTR read_eflags();
   } else if (!strcmp(pname, "selector")) {
     segname = param->get_parent()->get_name();
@@ -645,19 +680,7 @@ void BX_CPU_C::param_restore(bx_param_c *param, Bit64s val)
   bx_segment_reg_t *segment = NULL;
 
   pname = param->get_name();
-  if (!strcmp(pname, "cpu_version")) {
-    if (val != get_cpu_version_information()) {
-      BX_PANIC(("save/restore: CPU version mismatch"));
-    }
-  } else if (!strcmp(pname, "cpuid_std")) {
-    if (val != get_std_cpuid_features()) {
-      BX_PANIC(("save/restore: CPUID mismatch"));
-    }
-  } else if (!strcmp(pname, "cpuid_ext")) {
-    if (val != get_extended_cpuid_features()) {
-      BX_PANIC(("save/restore: CPUID mismatch"));
-    }
-  } else if (!strcmp(pname, "EFLAGS")) {
+  if (!strcmp(pname, "EFLAGS")) {
     BX_CPU_THIS_PTR setEFlags((Bit32u)val);
   } else if (!strcmp(pname, "selector")) {
     segname = param->get_parent()->get_name();
@@ -720,6 +743,10 @@ void BX_CPU_C::after_restore_state(void)
 
 BX_CPU_C::~BX_CPU_C()
 {
+#if BX_CPU_LEVEL >= 4
+  delete cpuid;
+#endif
+
   BX_INSTR_EXIT(BX_CPU_ID);
   BX_DEBUG(("Exit."));
 }
@@ -738,13 +765,21 @@ void BX_CPU_C::reset(unsigned source)
   for (n=0;n<BX_GENERAL_REGISTERS;n++)
     BX_WRITE_32BIT_REGZ(n, 0);
 
-  BX_WRITE_32BIT_REGZ(BX_32BIT_REG_EDX, get_cpu_version_information());
+//BX_WRITE_32BIT_REGZ(BX_32BIT_REG_EDX, get_cpu_version_information());
 
   // initialize NIL register
   BX_WRITE_32BIT_REGZ(BX_NIL_REGISTER, 0);
 
   // status and control flags register set
   setEFlags(0x2); // Bit1 is always set
+
+#if BX_DEBUGGER || BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+  if (source == BX_RESET_HARDWARE)
+    BX_CPU_THIS_PTR icount = 0;
+#endif
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+  BX_CPU_THIS_PTR icount_last_sync = BX_CPU_THIS_PTR icount;
+#endif
 
   BX_CPU_THIS_PTR inhibit_mask = 0;
   BX_CPU_THIS_PTR activity_state = BX_ACTIVITY_STATE_ACTIVE;
@@ -874,6 +909,7 @@ void BX_CPU_C::reset(unsigned source)
 
 #if BX_X86_DEBUGGER
   BX_CPU_THIS_PTR in_repeat = 0;
+  BX_CPU_THIS_PTR codebp = 0;
 #endif
   BX_CPU_THIS_PTR in_smm = 0;
   BX_CPU_THIS_PTR disable_SMI = 0;
@@ -902,15 +938,16 @@ void BX_CPU_C::reset(unsigned source)
   BX_CPU_THIS_PTR cr3 = 0;
 #endif
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   BX_CPU_THIS_PTR cr4.set32(0);
+  BX_CPU_THIS_PTR cr4_suppmask = get_cr4_allow_mask();
 #endif
 
 #if BX_CPU_LEVEL >= 6
   BX_CPU_THIS_PTR xcr0.set32(0x1);
   BX_CPU_THIS_PTR xcr0_suppmask = 0x3;
 #if BX_SUPPORT_AVX
-  if (BX_CPU_SUPPORT_ISA_EXTENSION(BX_CPU_AVX))
+  if (BX_CPUID_SUPPORT_ISA_EXTENSION(BX_CPU_AVX))
     BX_CPU_THIS_PTR xcr0_suppmask |= BX_XCR0_AVX_MASK;
 #endif
 #endif
@@ -924,9 +961,23 @@ void BX_CPU_C::reset(unsigned source)
   BX_CPU_THIS_PTR msr.apicbase |= 0x900;
   BX_CPU_THIS_PTR lapic.set_base(BX_CPU_THIS_PTR msr.apicbase);
 #endif
-#if BX_SUPPORT_X86_64
-  BX_CPU_THIS_PTR efer.set32(0);
 
+#if BX_CPU_LEVEL >= 5
+  BX_CPU_THIS_PTR efer.set32(0);
+  BX_CPU_THIS_PTR efer_suppmask = 0;
+  if (BX_CPUID_SUPPORT_CPU_EXTENSION(BX_CPU_NX))
+    BX_CPU_THIS_PTR efer_suppmask |= BX_EFER_NXE_MASK;
+  if (BX_CPUID_SUPPORT_ISA_EXTENSION(BX_CPU_SYSCALL_SYSRET))
+    BX_CPU_THIS_PTR efer_suppmask |= BX_EFER_SCE_MASK;
+#if BX_SUPPORT_X86_64
+  if (BX_CPUID_SUPPORT_CPU_EXTENSION(BX_CPU_LONG_MODE))
+    BX_CPU_THIS_PTR efer_suppmask |= (BX_EFER_SCE_MASK | BX_EFER_LME_MASK | BX_EFER_LMA_MASK);
+  if (BX_CPUID_SUPPORT_CPU_EXTENSION(BX_CPU_FFXSR))
+    BX_CPU_THIS_PTR efer_suppmask |= BX_EFER_FFXSR_MASK;
+#endif
+#endif
+
+#if BX_SUPPORT_X86_64
   BX_CPU_THIS_PTR msr.star  = 0;
   BX_CPU_THIS_PTR msr.lstar = 0;
   BX_CPU_THIS_PTR msr.cstar = 0;
@@ -991,11 +1042,10 @@ void BX_CPU_C::reset(unsigned source)
 #if BX_DEBUGGER
   BX_CPU_THIS_PTR stop_reason = STOP_NO_REASON;
   BX_CPU_THIS_PTR magic_break = 0;
+  BX_CPU_THIS_PTR trace = 0;
   BX_CPU_THIS_PTR trace_reg = 0;
   BX_CPU_THIS_PTR trace_mem = 0;
 #endif
-
-  BX_CPU_THIS_PTR trace = 0;
 
   // Reset the Floating Point Unit
 #if BX_SUPPORT_FPU
@@ -1018,7 +1068,7 @@ void BX_CPU_C::reset(unsigned source)
 
     BX_CPU_THIS_PTR mxcsr.mxcsr = MXCSR_RESET;
     BX_CPU_THIS_PTR mxcsr_mask = 0x0000ffbf;
-    if (BX_CPU_SUPPORT_ISA_EXTENSION(BX_CPU_SSE2))
+    if (BX_CPUID_SUPPORT_ISA_EXTENSION(BX_CPU_SSE2))
       BX_CPU_THIS_PTR mxcsr_mask |= MXCSR_DAZ;
     if (BX_SUPPORT_MISALIGNED_SSE)
       BX_CPU_THIS_PTR mxcsr_mask |= MXCSR_MISALIGNED_EXCEPTION_MASK;
@@ -1030,6 +1080,9 @@ void BX_CPU_C::reset(unsigned source)
   BX_CPU_THIS_PTR in_smm_vmx = BX_CPU_THIS_PTR in_smm_vmx_guest = 0;
   BX_CPU_THIS_PTR in_event = 0;
   BX_CPU_THIS_PTR vmx_interrupt_window = 0;
+#if BX_SUPPORT_VMX >= 2  
+  BX_CPU_THIS_PTR pending_vmx_timer_expired = 0;
+#endif
   BX_CPU_THIS_PTR vmcsptr = BX_CPU_THIS_PTR vmxonptr = BX_INVALID_VMCSPTR;
   BX_CPU_THIS_PTR vmcshostptr = 0;
   /* enable VMX, should be done in BIOS instead */
@@ -1055,21 +1108,18 @@ void BX_CPU_C::reset(unsigned source)
   }
 #endif
 
-  // initialize CPUID values - make sure apicbase already initialized
-#if BX_CPU_LEVEL >= 4
-  set_cpuid_defaults();
-#endif
-
   updateFetchModeMask();
+
+#if BX_CPU_LEVEL >= 4
+  BX_CPU_THIS_PTR cpuid->dump_cpuid();
+#endif
 
   BX_INSTR_RESET(BX_CPU_ID, source);
 }
 
 void BX_CPU_C::sanity_checks(void)
 {
-  Bit8u al, cl, dl, bl, ah, ch, dh, bh;
-  Bit16u ax, cx, dx, bx, sp, bp, si, di;
-  Bit32u eax, ecx, edx, ebx, esp, ebp, esi, edi;
+  Bit32u eax = EAX, ecx = ECX, edx = EDX, ebx = EBX, esp = ESP, ebp = EBP, esi = ESI, edi = EDI;
 
   EAX = 0xFFEEDDCC;
   ECX = 0xBBAA9988;
@@ -1079,6 +1129,8 @@ void BX_CPU_C::sanity_checks(void)
   EBP = 0xAA998877;
   ESI = 0x66554433;
   EDI = 0x2211FFEE;
+
+  Bit8u al, cl, dl, bl, ah, ch, dh, bh;
 
   al = AL;
   cl = CL;
@@ -1101,6 +1153,8 @@ void BX_CPU_C::sanity_checks(void)
     BX_PANIC(("problems using BX_READ_8BIT_REGx()!"));
   }
 
+  Bit16u ax, cx, dx, bx, sp, bp, si, di;
+
   ax = AX;
   cx = CX;
   dx = DX;
@@ -1122,14 +1176,14 @@ void BX_CPU_C::sanity_checks(void)
     BX_PANIC(("problems using BX_READ_16BIT_REG()!"));
   }
 
-  eax = EAX;
-  ecx = ECX;
-  edx = EDX;
-  ebx = EBX;
-  esp = ESP;
-  ebp = EBP;
-  esi = ESI;
-  edi = EDI;
+  EAX = eax; /* restore registers */
+  ECX = ecx;
+  EDX = edx;
+  EBX = ebx;
+  ESP = esp;
+  EBP = ebp;
+  ESI = esi;
+  EDI = edi;
 
   if (sizeof(Bit8u)  != 1  ||  sizeof(Bit8s)  != 1)
     BX_PANIC(("data type Bit8u or Bit8s is not of length 1 byte!"));
@@ -1183,7 +1237,7 @@ void BX_CPU_C::assert_checks(void)
   if (! check_CR0(BX_CPU_THIS_PTR cr0.val32))
     BX_PANIC(("assert_checks: CR0 consistency checks failed !"));
 
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
   // check CR4 consistency
   if (! check_CR4(BX_CPU_THIS_PTR cr4.val32))
     BX_PANIC(("assert_checks: CR4 consistency checks failed !"));
@@ -1234,8 +1288,11 @@ void BX_CPU_C::assert_checks(void)
     }
   }
 
-#if BX_SUPPORT_MONITOR_MWAIT
-  if (BX_CPU_THIS_PTR monitor.monitor_end < BX_CPU_THIS_PTR monitor.monitor_begin)
-    BX_PANIC(("assert_checks: MONITOR range is not set correctly !"));
+#if BX_SUPPORT_X86_64 == 0 && BX_CPU_LEVEL >= 5
+  if (BX_CPU_THIS_PTR efer_suppmask & (BX_EFER_SCE_MASK |
+                    BX_EFER_LME_MASK | BX_EFER_LMA_MASK | BX_EFER_FFXSR_MASK))
+  {
+    BX_PANIC(("assert_checks: EFER supports x86-64 specific bits !"));
+  }
 #endif
 }

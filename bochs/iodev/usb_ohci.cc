@@ -125,9 +125,9 @@ void bx_usb_ohci_c::init(void)
                             "Experimental USB OHCI");
 
   for (i=0; i<256; i++)
-    BX_OHCI_THIS hub.pci_conf[i] = 0x0;
+    BX_OHCI_THIS pci_conf[i] = 0x0;
 
-  BX_OHCI_THIS hub.base_addr = 0x0;
+  BX_OHCI_THIS pci_base_address[0] = 0x0;
   BX_OHCI_THIS hub.ohci_done_count = 7;
   BX_OHCI_THIS hub.use_control_head = 0;
   BX_OHCI_THIS hub.use_bulk_head = 0;
@@ -164,6 +164,9 @@ void bx_usb_ohci_c::init(void)
       DEV_register_timer(this, iolight_timer_handler, 5000, 0,0, "OHCI i/o light");
   }
   BX_OHCI_THIS hub.iolight_counter = 0;
+
+  // register handler for correct device connect handling after runtime config
+  SIM->register_runtime_config_handler(BX_OHCI_THIS_PTR, runtime_config_handler);
   BX_OHCI_THIS hub.device_change = 0;
 
   BX_INFO(("USB OHCI initialized"));
@@ -214,7 +217,7 @@ void bx_usb_ohci_c::reset(unsigned type)
       { 0x57, 0x1F },                 //
     };
     for (i = 0; i < sizeof(reset_vals) / sizeof(*reset_vals); ++i) {
-        BX_OHCI_THIS hub.pci_conf[reset_vals[i].addr] = reset_vals[i].val;
+        BX_OHCI_THIS pci_conf[reset_vals[i].addr] = reset_vals[i].val;
     }
   }
 
@@ -432,16 +435,16 @@ void bx_usb_ohci_c::register_state(void)
   new bx_shadow_bool_c(hub, "use_control_head", &BX_OHCI_THIS hub.use_control_head);
   new bx_shadow_bool_c(hub, "use_bulk_head", &BX_OHCI_THIS hub.use_bulk_head);
   new bx_shadow_num_c(hub, "sof_time", &BX_OHCI_THIS hub.sof_time);
-  register_pci_state(hub, BX_OHCI_THIS hub.pci_conf);
+  register_pci_state(hub);
 }
 
 void bx_usb_ohci_c::after_restore_state(void)
 {
   if (DEV_pci_set_base_mem(BX_OHCI_THIS_PTR, read_handler, write_handler,
-                         &BX_OHCI_THIS hub.base_addr,
-                         &BX_OHCI_THIS hub.pci_conf[0x10],
+                         &BX_OHCI_THIS pci_base_address[0],
+                         &BX_OHCI_THIS pci_conf[0x10],
                          4096))  {
-     BX_INFO(("new base address: 0x%04x", BX_OHCI_THIS hub.base_addr));
+     BX_INFO(("new base address: 0x%04x", BX_OHCI_THIS pci_base_address[0]));
   }
   for (int j=0; j<BX_N_USB_OHCI_PORTS; j++) {
     if (BX_OHCI_THIS hub.usb_port[j].device != NULL) {
@@ -494,7 +497,7 @@ void bx_usb_ohci_c::update_irq()
       level = 1;
       BX_DEBUG(("Interrupt Fired."));
   }
-  DEV_pci_set_irq(BX_OHCI_THIS hub.devfunc, BX_OHCI_THIS hub.pci_conf[0x3d], level);
+  DEV_pci_set_irq(BX_OHCI_THIS hub.devfunc, BX_OHCI_THIS pci_conf[0x3d], level);
 }
 
 void bx_usb_ohci_c::set_interrupt(Bit32u value)
@@ -517,7 +520,7 @@ bx_bool bx_usb_ohci_c::read_handler(bx_phy_address addr, unsigned len, void *dat
     return 1;
   }
 
-  Bit32u  offset = (Bit32u)(addr - BX_OHCI_THIS hub.base_addr);
+  Bit32u  offset = (Bit32u)(addr - BX_OHCI_THIS pci_base_address[0]);
   switch (offset) {
     case 0x00: // HcRevision
       val = BX_OHCI_THIS hub.op_regs.HcRevision;
@@ -687,7 +690,7 @@ bx_bool bx_usb_ohci_c::read_handler(bx_phy_address addr, unsigned len, void *dat
 bx_bool bx_usb_ohci_c::write_handler(bx_phy_address addr, unsigned len, void *data, void *param)
 {
   Bit32u value = *((Bit32u *) data);
-  Bit32u  offset = (Bit32u)addr - BX_OHCI_THIS hub.base_addr;
+  Bit32u  offset = (Bit32u)addr - BX_OHCI_THIS pci_base_address[0];
   int p, org_state;
 
   int name = offset >> 2;
@@ -1002,8 +1005,6 @@ void bx_usb_ohci_c::usb_frame_timer(void)
   struct OHCI_ED cur_ed;
   Bit32u address, ed_address;
   Bit16u zero = 0;
-  int i;
-  char pname[6];
 
   if (BX_OHCI_THIS hub.op_regs.HcControl.hcfs == 2) {
     // set remaining to the interval amount.
@@ -1105,19 +1106,6 @@ do_iso_eds:
     }
 
   }  // end run schedule
-
-  for (i = 0; i < BX_N_USB_OHCI_PORTS; i++) {
-    // forward timer tick
-    if (BX_OHCI_THIS hub.usb_port[i].device != NULL) {
-      BX_OHCI_THIS hub.usb_port[i].device->timer();
-    }
-    // device change support
-    if ((BX_OHCI_THIS hub.device_change & (1 << i)) != 0) {
-      sprintf(pname, "port%d", i + 1);
-      init_device(i, (bx_list_c*)SIM->get_param(pname, SIM->get_param(BXPN_USB_OHCI)));
-      BX_OHCI_THIS hub.device_change &= ~(1 << i);
-    }
-  }
 }
 
 void bx_usb_ohci_c::process_ed(struct OHCI_ED *ed, const Bit32u ed_address)
@@ -1363,13 +1351,39 @@ void bx_usb_ohci_c::iolight_timer()
   }
 }
 
+void bx_usb_ohci_c::runtime_config_handler(void *this_ptr)
+{
+  bx_usb_ohci_c *class_ptr = (bx_usb_ohci_c *) this_ptr;
+  class_ptr->runtime_config();
+}
+
+void bx_usb_ohci_c::runtime_config(void)
+{
+  int i;
+  char pname[6];
+
+  for (i = 0; i < BX_N_USB_OHCI_PORTS; i++) {
+    // device change support
+    if ((BX_OHCI_THIS hub.device_change & (1 << i)) != 0) {
+      BX_INFO(("USB port #%d: device connect", i+1));
+      sprintf(pname, "port%d", i + 1);
+      init_device(i, (bx_list_c*)SIM->get_param(pname, SIM->get_param(BXPN_USB_OHCI)));
+      BX_OHCI_THIS hub.device_change &= ~(1 << i);
+    }
+    // forward to connected device
+    if (BX_OHCI_THIS hub.usb_port[i].device != NULL) {
+      BX_OHCI_THIS hub.usb_port[i].device->runtime_config();
+    }
+  }
+}
+
 // pci configuration space read callback handler
 Bit32u bx_usb_ohci_c::pci_read_handler(Bit8u address, unsigned io_len)
 {
   Bit32u value = 0;
 
   for (unsigned i=0; i<io_len; i++) {
-    value |= (BX_OHCI_THIS hub.pci_conf[address+i] << (i*8));
+    value |= (BX_OHCI_THIS pci_conf[address+i] << (i*8));
   }
 
   if (io_len == 1)
@@ -1394,11 +1408,11 @@ void bx_usb_ohci_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_l
 
   for (unsigned i=0; i<io_len; i++) {
     value8 = (value >> (i*8)) & 0xFF;
-    oldval = BX_OHCI_THIS hub.pci_conf[address+i];
+    oldval = BX_OHCI_THIS pci_conf[address+i];
     switch (address+i) {
       case 0x04:
         value8 &= 0x06; // (bit 0 is read only for this card) (we don't allow port IO)
-        BX_OHCI_THIS hub.pci_conf[address+i] = value8;
+        BX_OHCI_THIS pci_conf[address+i] = value8;
         break;
       case 0x3d: //
       case 0x3e: //
@@ -1409,7 +1423,7 @@ void bx_usb_ohci_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_l
       case 0x3c:
         if (value8 != oldval) {
           BX_INFO(("new irq line = %d", value8));
-          BX_OHCI_THIS hub.pci_conf[address+i] = value8;
+          BX_OHCI_THIS pci_conf[address+i] = value8;
         }
         break;
       case 0x10:  // low 12 bits of BAR are R/O
@@ -1420,15 +1434,15 @@ void bx_usb_ohci_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_l
       case 0x13:
         baseaddr_change |= (value8 != oldval);
       default:
-        BX_OHCI_THIS hub.pci_conf[address+i] = value8;
+        BX_OHCI_THIS pci_conf[address+i] = value8;
     }
   }
   if (baseaddr_change) {
     if (DEV_pci_set_base_mem(BX_OHCI_THIS_PTR, read_handler, write_handler,
-                             &BX_OHCI_THIS hub.base_addr,
-                             &BX_OHCI_THIS hub.pci_conf[0x10],
+                             &BX_OHCI_THIS pci_base_address[0],
+                             &BX_OHCI_THIS pci_conf[0x10],
                              4096)) {
-      BX_INFO(("new base address: 0x%04x", BX_OHCI_THIS hub.base_addr));
+      BX_INFO(("new base address: 0x%04x", BX_OHCI_THIS pci_base_address[0]));
     }
   }
 
@@ -1486,8 +1500,8 @@ const char *bx_usb_ohci_c::usb_param_handler(bx_param_string_c *param, int set,
     portnum = atoi((param->get_parent())->get_name()+4) - 1;
     bx_bool empty = ((strlen(val) == 0) || (!strcmp(val, "none")));
     if ((portnum >= 0) && (portnum < BX_N_USB_OHCI_PORTS)) {
-      BX_INFO(("USB port #%d experimental device change", portnum+1));
       if (empty && BX_OHCI_THIS hub.usb_port[portnum].HcRhPortStatus.ccs) {
+        BX_INFO(("USB port #%d: device disconnect", portnum+1));
         if (BX_OHCI_THIS hub.usb_port[portnum].device != NULL) {
           type = BX_OHCI_THIS hub.usb_port[portnum].device->get_type();
         }

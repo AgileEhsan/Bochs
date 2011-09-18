@@ -136,6 +136,8 @@ bx_bool BX_CPU_C::vmcs_field_supported(Bit32u encoding)
 #endif
 #if BX_SUPPORT_VMX >= 2
     case VMCS_32BIT_CONTROL_SECONDARY_VMEXEC_CONTROLS:
+    case VMCS_32BIT_CONTROL_PAUSE_LOOP_EXITING_GAP:
+    case VMCS_32BIT_CONTROL_PAUSE_LOOP_EXITING_WINDOW:
 #endif
       return 1;
 
@@ -175,6 +177,9 @@ bx_bool BX_CPU_C::vmcs_field_supported(Bit32u encoding)
     case VMCS_32BIT_GUEST_ACTIVITY_STATE:
     case VMCS_32BIT_GUEST_SMBASE:
     case VMCS_32BIT_GUEST_IA32_SYSENTER_CS_MSR:
+#if BX_SUPPORT_VMX >= 2    
+    case VMCS_32BIT_GUEST_PREEMPTION_TIMER_VALUE:
+#endif
       return 1;
 
     /* VMCS 32-bit host-state fields */

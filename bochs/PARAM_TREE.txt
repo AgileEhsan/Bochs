@@ -20,13 +20,14 @@ cpu
   n_processors
   n_cores
   n_threads
+  model
   ips
   quantum
   reset_on_triple_fault
   msrs
+  cpuid_limit_winnt
 
 cpuid
-  cpuid_limit_winnt
   family
   model
   stepping
@@ -35,13 +36,19 @@ cpuid
   mmx
   sep
   sse
+  sse4a
   aes
   movbe
   xsave
-  xapic
+  xsaveopt
+  avx
+  avx_f16c
+  bmi
+  apic
   1g_pages
   pcid
   fsgsbase
+  smep
   mwait
   mwait_is_nop
 
@@ -205,6 +212,8 @@ ports
         options
     ohci
       (same options as ports.usb.uhci)
+    xhci
+      (same options as ports.usb.uhci)
 
 network
   ne2k
@@ -234,7 +243,7 @@ sound
     dmatimer
 
 misc
-  text_snapshot_check
+  port_e9_hack
   gdbstub
     port
     text_base
@@ -266,4 +275,4 @@ wxdebug
 user
   (subtree for user-defined options)
 
-(updated Jan 16, 2011 by vruppert)
+(updated July 31, 2011 by vruppert)

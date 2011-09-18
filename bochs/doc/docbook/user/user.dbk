@@ -94,9 +94,9 @@ interactions between Bochs and the host operating system can be complicated,
 and in some cases they are host platform specific.  Sending a network packet in
 FreeBSD requires different code than sending the packet in Windows XP, for
 example.  For this reason, certain features are supported on some host
-platforms and not others.  On GNU/Linux, Bochs can simulate a network card that
-communicates with the world, but on BeOS the simulated network card may not
-work because the communication code between the device model and the BeOS
+platforms and not others. On GNU/Linux, Bochs can simulate a network card that
+communicates with the world, but on MacOSX the simulated network card may not
+work because the communication code between the device model and the MacOSX
 operating system has not been written.
 </para>
 
@@ -237,7 +237,7 @@ disk to assist you in the process of installing a guest operating system.
 Bochs only provides you with the "virtual hardware", and it is up to you to do the rest.
 </para>
 
-<para>Bochs will run on Windows, GNU/Linux, FreeBSD, OpenBSD, or BeOS.
+<para>Bochs will run on Windows, GNU/Linux, FreeBSD, OpenBSD, or MacOSX.
 If you are running on x86 hardware, you have a range of choices.
 Check the installation section for your host platform to see what options
 Bochs supports on your platform.  If the most important factor is speed,
@@ -247,8 +247,8 @@ you may want to try a virtualization product instead of Bochs (VMware, VirtualBo
 <para>
 If you are using a non-x86 machine, then Bochs is one of the few choices for
 running x86 software.  Bochs has been known to work on Solaris (Sparc),
-GNU/Linux (PowerPC/Alpha), MacOS (PowerPC), IRIX (MIPS), BeOS (PowerPC), Digital
-Unix (Alpha), and AIX (PowerPC).
+GNU/Linux (PowerPC/Alpha), MacOS (PowerPC), IRIX (MIPS), Digital Unix (Alpha),
+and AIX (PowerPC).
 </para>
 
 <para>
@@ -443,7 +443,7 @@ currently work with.
     <entry>Yes</entry>
     <entry>Emulates ATAPI-4/IDE CD-ROM.  The CD-ROMs can read from an ISO disk image
     on any platform. On Windows (9x/ME/NT/2000/XP), Linux, SunOS, FreeBSD,
-    NetBSD, OpenBSD, Amiga/MorphOS, MacOSX and BeOS, Bochs can read from the
+    NetBSD, OpenBSD, Amiga/MorphOS and MacOSX, Bochs can read from the
     physical CD-ROM drive. Starting with version 1.4, Bochs is even able to boot from
     a bootable CD or bootable ISO image.
     </entry>
@@ -621,20 +621,6 @@ code that displays the Bochs VGA screen and handles keyboard and mouse events.
     </row>
 
     <row>
-      <entry>BeOS</entry>
-      <entry>
-        Kevin Lawton wrote this port, originally to R3/PPC using
-        CodeWarrior. It now works on R4/x86 with egcs. Simon Huet picked up
-        maintaining/reworking the BeOS GUI port. In September 2001, Bernd Korz
-        of Yellow Tab, Inc.
-        (<ulink url="http://www.yellowtab.com">www.yellowtab.com</ulink>), took
-        over the BeOS/Zeta port, and is working on raw CD-ROM and raw floppy
-        support. For compiling, see <xref linkend="compile-beos">.
-      </entry>
-      <entry>beos, sdl</entry>
-    </row>
-
-    <row>
       <entry>MacOS X</entry>
       <entry>
         Emmanuel Mailliard ported the Macintosh code to MacOS X with Carbon API.
@@ -806,7 +792,7 @@ code that displays the Bochs VGA screen and handles keyboard and mouse events.
      Does Bochs support a CD-ROM?
      </para></question>
      <answer><para>
-     Yes, a CD-ROM is supported in Linux, Windows, BeOS, and most BSDs. The
+     Yes, a CD-ROM is supported in Linux, Windows, and most BSDs. The
      CD-ROM drivers for Bochs allow the guest operating system to access the
      host operating system's CD-ROM data directly.
      </para></answer>
@@ -992,7 +978,7 @@ available at <ulink url="http://www.cygwin.com">www.cygwin.com</ulink>.
   user$ <command>cvs -z3 -d:pserver:anonymous@bochs.cvs.sourceforge.net:/cvsroot/bochs checkout bochs</command>
   cvs server: Updating bochs
   U bochs/.bochsrc
-  U bochs/.conf.beos-x86-R4
+  U bochs/.conf.linux
   U bochs/.conf.macos
      .
      .   <lineannotation>(This might take a few minutes, depending on your network connection.)</lineannotation>
@@ -1661,7 +1647,7 @@ contains the files <filename>bochs.h</filename> and
 The standard compile process has three basic steps:
 <command>configure</command>, <command>make</command>, and <command>make
 install</command>.  Each step is described in a separate section below.  The
-standard compile process is used on all Unix machines, MacOS X, BeOS, and
+standard compile process is used on all Unix machines, MacOS X, and
 Cygwin (win32).  There are separate instructions for <link
 linkend="compiling-win32">compiling for Win32 with Microsoft VC++</link>.
 </para>
@@ -1744,7 +1730,6 @@ been tested in recent Bochs versions:
   .conf.macosx
   .conf.win32-vcpp
   .conf.win32-cygwin
-  .conf.beos
 </screen>
 </para>
 
@@ -1902,12 +1887,6 @@ In Bochs 1.3 and before, the X11 GUI was always the default.
     </entry>
   </row>
   <row>
-    <entry>BeOS</entry>
-    <entry>--with-beos</entry>
-    <entry>none
-    </entry>
-  </row>
-  <row>
     <entry>AmigaOS</entry>
     <entry>--with-amigaos</entry>
     <entry>none
@@ -1966,11 +1945,6 @@ In Bochs 1.3 and before, the X11 GUI was always the default.
     <row>
       <entry>--with-sdl</entry>
       <entry>Enable support for the SDL GUI interface; see <xref linkend="compile-sdl">.</entry>
-    </row>
-    <row>
-      <entry>--with-beos</entry>
-      <entry>Use BeOS GUI.  The configure script will run natively
-       on BeOS; use this option when doing so.</entry>
     </row>
     <row>
       <entry>--with-term</entry>
@@ -2211,16 +2185,6 @@ turn it off.
       <entry>support repeated I/O and memory copy speedups</entry>
     </row>
     <row>
-      <entry>--enable-trace-cache</entry>
-      <entry>no</entry>
-      <entry>support instruction trace cache for faster execution</entry>
-    </row>
-    <row>
-      <entry>--enable-host-specific-asms</entry>
-      <entry>yes</entry>
-      <entry>support for running native x86 instructions on an x86 machine</entry>
-    </row>
-    <row>
       <entry>--enable-fast-function-calls</entry>
       <entry>no</entry>
       <entry>support for fast function calls (gcc on x86 only)</entry>
@@ -2231,9 +2195,7 @@ turn it off.
       <entry>
         Turn on the enables for all speed optimizations that the
         developers believe are safe to use:
-         --enable-trace-cache,
          --enable-repeat-speedups,
-         --enable-host-specific-asms,
          --enable-fast-function-calls.
       </entry>
     </row>
@@ -2612,21 +2574,6 @@ Bochs GUIs. Use <option>--with-x11</option> for X windows,
 </para>
 </section><!-- end: Compiling on MacOS X -->
 
-<section id="compile-beos"><title>Compiling on BeOS</title>
-<para>
-  Kevin Lawton ported Bochs to BeOS. Bernd Korz has taken over the port.
-  Since Bochs 1.4, you can use the same compile and install process as on
-  Unix, that is, configure will detect the BeOS platform and assume you
-  want the BeOS GUI.
-<screen>
-  configure
-  make
-</screen>
-  Optionally, you can use the configure shortcut script for BeOS,
-  <filename>.conf.beos</filename>, which uses the SDL GUI by default.
-</para>
-</section><!-- end: Compiling on BeOS -->
-
 <section id="compile-morphos"><title>Compiling on Amiga/MorphOS</title>
 <para>
   Nicholai Benalal created this port to MorphOS running on Amiga. It should
@@ -2675,7 +2622,7 @@ Bochs GUIs. Use <option>--with-x11</option> for X windows,
   Dave Poirier has written an SDL interface for Bochs. Simple DirectMedia
   Layer, or SDL, is a cross-platform multimedia library distributed from
   <ulink url="http://libsdl.org/">libsdl.org</ulink>. SDL is available
-  for many platforms including Win32, Linux, BSD, IRIX, MacOS, MacOS X, BeOS,
+  for many platforms including Win32, Linux, BSD, IRIX, MacOS, MacOS X,
   and AmigaOS.
 </para>
 <para>
@@ -3004,6 +2951,11 @@ Reset the CPU when triple fault occur (highly recommended) rather than PANIC.
 Remember that if you are trying to continue after triple fault the simulation
 will be completely bogus !
 </para>
+<para><command>cpuid_limit_winnt</command></para>
+<para>
+Determine whether to limit maximum CPUID function to 2. This mode is required
+to workaround WinNT installation and boot issues.
+</para>
 <para><command>msrs</command></para>
 <para>
 Define path to user CPU Model Specific Registers (MSRs) specification.
@@ -3045,11 +2997,11 @@ speed.</para></footnote>.
   </row>
 </thead>
   <tbody>
+<row><entry>2.4.6</entry><entry>3.4Ghz</entry><entry>Intel Core i7 2600 with Win7x64/g++ 4.5.2 </entry><entry> 85 to 95 MIPS</entry></row>
 <row><entry>2.3.7</entry><entry>3.2Ghz</entry><entry>Intel Core 2 Q9770 with WinXP/g++ 3.4 </entry><entry> 50 to 55 MIPS</entry></row>
 <row><entry>2.3.7</entry><entry>2.6Ghz</entry><entry>Intel Core 2 Duo with WinXP/g++ 3.4 </entry><entry> 38 to 43 MIPS</entry></row>
 <row><entry>2.2.6</entry><entry>2.6Ghz</entry><entry>Intel Core 2 Duo with WinXP/g++ 3.4 </entry><entry> 21 to 25 MIPS</entry></row>
 <row><entry>2.2.6</entry><entry>2.1Ghz</entry><entry>Athlon XP with Linux 2.6/g++ 3.4 </entry><entry> 12 to 15 MIPS</entry></row>
-<row><entry>2.0.1</entry><entry>1.6Ghz</entry><entry>Intel P4 with Win2000/g++ 3.3 </entry><entry> 5 to  7 MIPS</entry></row>
 </tbody>
 </tgroup>
 </table>
@@ -3059,13 +3011,18 @@ speed.</para></footnote>.
 <para>
 Example:
 <screen>
-  cpuid: mmx=1, sep=1, sse=sse4_2, xapic=1, aes=1, movbe=1, xsave=1, cpuid_limit_winnt=0
+  cpuid: mmx=1, sep=1, sse=sse4_2, apic=xapic, aes=1, movbe=1, xsave=1
 </screen>
 This defines features and functionality supported by Bochs emulated CPU:
 </para>
 <para><command>mmx</command></para>
 <para>
 Select MMX instruction set support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
+</para>
+<para><command>apic</command></para>
+<para>
+Select APIC configuration (LEGACY/XAPIC/X2APIC).
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
 </para>
 <para><command>sep</command></para>
@@ -3079,9 +3036,9 @@ Select SSE instruction set support.
 Any of NONE/SSE/SSE2/SSE3/SSSE3/SSE4_1/SSE4_2 could be selected.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 </para>
-<para><command>xapic</command></para>
+<para><command>sse4a</command></para>
 <para>
-Select XAPIC extensions support.
+Select AMD SSE4A instructions support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 </para>
 <para><command>aes</command></para>
@@ -3099,6 +3056,26 @@ This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 Select XSAVE extensions support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 </para>
+<para><command>xsaveopt</command></para>
+<para>
+Select XSAVEOPT instruction support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+</para>
+<para><command>avx</command></para>
+<para>
+Select AVX/AVX2 instruction set support.
+This option exists only if Bochs compiled with --enable-avx option.
+</para>
+<para><command>avx_f16c</command></para>
+<para>
+Select AVX float16 convert instructions support.
+This option exists only if Bochs compiled with --enable-avx option.
+</para>
+<para><command>bmi</command></para>
+<para>
+Select BMI1/BMI2 instructions support.
+This option exists only if Bochs compiled with --enable-avx option.
+</para>
 <para><command>1g_pages</command></para>
 <para>
 Enable 1G page size support in long mode.
@@ -3108,6 +3085,11 @@ This option exists only if Bochs compiled with x86-64 support.
 <para>
 Enable Process-Context Identifiers (PCID) support in long mode.
 This option exists only if Bochs compiled with x86-64 support.
+</para>
+<para><command>smep</command></para>
+<para>
+Enable Supervisor Mode Execution Protection (SMEP) support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 </para>
 <para><command>mwait</command></para>
 <para>
@@ -3141,11 +3123,6 @@ twelve-character ASCII string.
 <para>
 Set the CPUID brand string returned by CPUID(0x80000002 .. 0x80000004]).  This should be
 at most a forty-eight-character ASCII string.
-</para>
-<para><command>cpuid_limit_winnt</command></para>
-<para>
-Determine whether to limit maximum CPUID function to 3. This mode is required
-to workaround WinNT installation and boot issues.
 </para>
 </section>
 
@@ -3561,10 +3538,6 @@ behaviour. See the examples below for currently supported options.
 <row>
   <entry>carbon</entry>
   <entry>use Carbon library (for MacOS X)</entry>
-</row>
-<row>
-  <entry>beos</entry>
-  <entry>use native BeOS libraries</entry>
 </row>
 <row>
   <entry>macintosh</entry>
@@ -4000,12 +3973,12 @@ turns on this feature and 0 turns it off.
 </para>
 </section>
 
-<section><title>i440fxsupport</title>
+<section><title>pci</title>
 <para>
 Examples:
 <screen>
-  i440fxsupport: enabled=1 # default if compiled with PCI support
-  i440fxsupport: enabled=1, slot1=pcivga, slot2=ne2k
+  pci: enabled=1, chipset=i440fx # default if compiled with PCI support
+  pci: enabled=1, chipset=i440fx, slot1=pcivga, slot2=ne2k
 </screen>
 This option controls the presence of the i440FX PCI chipset. You can also
 specify the devices connected to PCI slots. Up to 5 slots are available.
@@ -4189,14 +4162,6 @@ version where this module was added.
   </row>
 </thead>
 <tbody>
-  <row>
-    <entry>arpback</entry>
-    <entry>ARP simulator - disabled by default.
-    </entry>
-    <entry>No</entry>
-    <entry>No</entry>
-    <entry>1.3</entry>
-  </row>
   <row>
     <entry>fbsd</entry>
     <entry>FreeBSD / OpenBSD packetmover.
@@ -4916,7 +4881,7 @@ For other arguments, see section <link linkend="bochsrc">bochsrc</link>.
 </row>
 <row>
   <entry>-r <replaceable>path</replaceable></entry>
-  <entry>specify path for restoring state (if save/restore support is compiled in)</entry>
+  <entry>specify path for restoring state</entry>
 </row>
 <row>
   <entry>--help</entry>
@@ -5153,13 +5118,13 @@ file yet.
 Starting with version 2.3, Bochs has limited save/restore support. The state of
 cpu(s), memory and all devices can be saved now. When running Bochs with there
 will be a button in the header bar called "Suspend". Depending on config interface
-and gui there will be a prompt where you can enter a path or a gui folder
-selection dialog box. It is possible to save the state at any time, but we
-recommend to do it when the simulation is idle. After pressing OK/Enter, Bochs
-will save a set of files into the selected folder. The state of hard disk images
-is not handled yet, so Bochs will ask you if you want to continue after saving
-state. We don't recommend to continue unless you are running a read-only guest
-system (e.g. Live-CD).
+and gui there will be a prompt where you can enter a path to an existing directory
+or a gui folder selection dialog box. It is possible to save the state at any time,
+but we recommend to do it when the simulation is idle. After pressing OK/Enter,
+Bochs will save a set of files into the selected folder. The state of hard disk
+images is not handled yet, so Bochs will ask you if you want to continue after
+saving state. We don't recommend to continue unless you are running a read-only
+guest system (e.g. Live-CD).
 </para>
 <para>
 To restore the saved simulation state you can select the restore function in the
@@ -6001,7 +5966,7 @@ structures are dynamically created by Bochs.
 </para></listitem>
 <listitem><para> ACPI support is required to boot SMP system in most of modern
 operating systems. For example WinXP 64 bit require ACPI support even for
-single processor configuration. Still not supported by Bochs. (FIXME)
+single processor configuration.
 </para></listitem>
 </itemizedlist>
 </para>
@@ -7309,7 +7274,7 @@ Bochs VBE Display Drivers for Windows NT/2000
   # Enable CL-GD5446 PCI
   vga: extension=cirrus
   vgaromimage: file=$BXSHARE/VGABIOS-lgpl-latest-cirrus
-  i440fxsupport: enabled=1, slot1=cirrus
+  pci: enabled=1, chipset=i440fx, slot1=cirrus
   </screen>
 
   <note><para>
@@ -7406,15 +7371,6 @@ If unspecified, the default "mode" is flat.
 </tgroup>
 </table>
 </para>
-
-<!--
-<note>
-<para>
-z-undoable and z-volatile modes are only available if the "- -enable-compressed-hd" parameter
-was set at compile time.
-</para>
-</note>
--->
 
 <section id="harddisk-mode-flat"><title>flat</title>
 <para>
@@ -8074,65 +8030,6 @@ The flat disk images must be created with the bximage utility
 </section>
 -->
 
-<!--
-<section><title>z-undoable</title>
-<para>
-</para>
-<section><title>description</title>
-<para>
-</para>
-</section>
-<section><title>image creation</title>
-<para>
-</para>
-</section>
-<section><title>path</title>
-<para>
-</para>
-</section>
-<section><title>external tools</title>
-<para>
-</para>
-</section>
-<section><title>typical use</title>
-<para>
-</para>
-</section>
-<section><title>limitations</title>
-<para>
-</para>
-</section>
-</section>
-
-<section><title>z-volatile</title>
-<para>
-</para>
-<section><title>description</title>
-<para>
-</para>
-</section>
-<section><title>image creation</title>
-<para>
-</para>
-</section>
-<section><title>path</title>
-<para>
-</para>
-</section>
-<section><title>external tools</title>
-<para>
-</para>
-</section>
-<section><title>typical use</title>
-<para>
-</para>
-</section>
-<section><title>limitations</title>
-<para>
-</para>
-</section>
-</section>
--->
 
 </section>
 
@@ -8174,10 +8071,6 @@ This tool can commit redologs into flat images.
 </para>
 <para>
 For now, only "undoable" redologs to flat image commits are supported.
-<!--
-"z-undoable" redologs can also be used, but you have to manually
-decompress the gzipped flat file before using bxcommit.
--->
 Sparse disk image commits may be added in the future.
 </para>
 <para>
@@ -8682,15 +8575,14 @@ com1: enabled=0
 # no sb16
 boot: cdrom
 floppy_bootsig_check: disabled=0
-vga_update_interval: 300000
+vga: update_freq=5
 keyboard_serial_delay: 250
 keyboard_paste_delay: 100000
 cpu: ips=3000000
 clock: sync=realtime, time0=0
-text_snapshot_check: 0
 mouse: enabled=0
 private_colormap: enabled=0
-i440fxsupport: enabled=0
+pci: enabled=0
 # no ne2k
 # no loader
 log: osr5.log
@@ -8700,7 +8592,6 @@ panic: action=ask
 error: action=report
 info: action=report
 debug: action=ignore
-pass: action=fatal
 keyboard_mapping: enabled=0, map=
 keyboard_type: mf
 user_shortcut: keys=none

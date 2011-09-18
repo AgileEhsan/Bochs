@@ -66,12 +66,6 @@ state.  The  callback  receives  monitored  memory  range and MWAIT flags as a
 parameters.
 
 
-	void bx_instr_new_instruction(unsigned cpu);
-
-The  callback  is  called  each  time,  when Bochs completes (commits) already
-finished instruction and starts a new one.
-
-
 	void bx_instr_cnear_branch_taken(unsigned cpu, bx_address new_eip);
 
 The  callback  is  called  each time, when currently executed instruction is a
@@ -96,14 +90,14 @@ The  callback  is  called each time, when currently executed instruction is an
 unconditional far branch (always taken).
 
 
-	void bx_instr_opcode(unsigned cpu, const Bit8u *opcode, unsigned len, bx_bool is32, bx_bool is64);
+	void bx_instr_opcode(unsigned cpu, bxInstruction_c *i, const Bit8u *opcode, unsigned len, bx_bool is32, bx_bool is64);
 
 The  callback  is  called  each  time, when Bochs completes  to  decode  a new
 instruction.  Through  this callback function Bochs could provide an opcode of
 the instruction, opcode length and an execution mode (16/32/64).
 
-Please note, that Bochs uses translation  caches so each simulated instruction
-might be executed multiple times but decoded only once.
+Note, that Bochs uses translation  caches so each simulated  instruction might
+be executed multiple times but decoded only once.
 
 
 	void bx_instr_interrupt(unsigned cpu, unsigned vector);
@@ -128,7 +122,7 @@ interrupt.
 The callback is called each time the CLFLUSH instruction is executed.
 
 
-	void bx_instr_tlb_cntrl(unsigned cpu, unsigned what, bx_phy_address new_cr3);
+	void bx_instr_tlb_cntrl(unsigned cpu, unsigned what, bx_phy_address new_cr_value);
 	void bx_instr_cache_cntrl(unsigned cpu, unsigned what);
 
 The  callback  is  called each time, when Bochs simulator executes a cache/tlb
@@ -136,9 +130,18 @@ control instruction.
 
 Possible instruction types, passed through bx_instr_tlb_cntrl:
 
-	#define BX_INSTR_MOV_CR3      	10
-	#define BX_INSTR_INVLPG       	11
-	#define BX_INSTR_TASKSWITCH   	12
+	#define BX_INSTR_MOV_CR0        10
+	#define BX_INSTR_MOV_CR3        11
+	#define BX_INSTR_MOV_CR4        12
+	#define BX_INSTR_TASK_SWITCH    13
+	#define BX_INSTR_CONTEXT_SWITCH 14 /* VMM and SMM enter/exit */
+	#define BX_INSTR_INVLPG         15
+	#define BX_INSTR_INVEPT         16
+	#define BX_INSTR_INVVPID        17
+	#define BX_INSTR_INVPCID        18
+
+The new_cr_value is provided for first 4 instruction types  only and undefined
+for all others.
 
 Possible instruction types, passed through bx_instr_cache_cntrl:
 

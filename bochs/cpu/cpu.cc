@@ -26,12 +26,6 @@
 
 #include "iodev/iodev.h"
 
-// Make code more tidy with a few macros.
-#if BX_SUPPORT_X86_64==0
-#define RIP EIP
-#define RCX ECX
-#endif
-
 #define InstrumentICACHE 0
 
 #if InstrumentICACHE
@@ -62,7 +56,7 @@ static unsigned iCacheMisses=0;
 //
 // If maximum instructions have been executed, return. The zero-count
 // means run forever.
-#if BX_SUPPORT_SMP || BX_DEBUGGER
+#if BX_SUPPORT_SMP
   #define CHECK_MAX_INSTRUCTIONS(count) \
     if ((count) > 0) {                  \
       (count)--;                        \
@@ -81,9 +75,11 @@ void BX_CPU_C::cpu_loop(Bit32u max_instr_count)
 #endif
 
   if (setjmp(BX_CPU_THIS_PTR jmp_buf_env)) {
-    // only from exception function we can get here ...
-    BX_INSTR_NEW_INSTRUCTION(BX_CPU_ID);
-    BX_TICK1_IF_SINGLE_PROCESSOR();
+    // can get here only from exception function or VMEXIT
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+    BX_CPU_THIS_PTR icount++;
+#endif
+    BX_SYNC_TIME_IF_SINGLE_PROCESSOR(0);
 #if BX_DEBUGGER || BX_GDBSTUB
     if (dbg_instruction_epilog()) return;
 #endif
@@ -120,35 +116,41 @@ void BX_CPU_C::cpu_loop(Bit32u max_instr_count)
     }
 
     bxICacheEntry_c *entry = getICacheEntry();
-
     bxInstruction_c *i = entry->i;
 
-#if BX_SUPPORT_TRACE_CACHE
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS 
+    for(;;) {
+
+      // want to allow changing of the instruction inside instrumentation callback
+      BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
+      RIP += i->ilen();
+      // when handlers chaining is enabled this single call will execute entire trace
+      BX_CPU_CALL_METHOD(i->execute, (i)); // might iterate repeat instruction
+
+      BX_SYNC_TIME_IF_SINGLE_PROCESSOR(0);
+
+      if (BX_CPU_THIS_PTR async_event) break;
+
+      i = getICacheEntry()->i;
+    }
+#else // BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS == 0
+
     bxInstruction_c *last = i + (entry->tlen);
 
     for(;;) {
-#endif
 
-//printf("%s\n", get_bx_opcode_name(i->getIaOpcode()));
-
-#if BX_DISASM
-      if (BX_CPU_THIS_PTR trace) {
-        // print the instruction that is about to be executed
+#if BX_DEBUGGER
+      if (BX_CPU_THIS_PTR trace)
         debug_disasm_instruction(BX_CPU_THIS_PTR prev_rip);
-      }
 #endif
 
-      // instruction decoding completed -> continue with execution
       // want to allow changing of the instruction inside instrumentation callback
       BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
       RIP += i->ilen();
       BX_CPU_CALL_METHOD(i->execute, (i)); // might iterate repeat instruction
       BX_CPU_THIS_PTR prev_rip = RIP; // commit new RIP
       BX_INSTR_AFTER_EXECUTION(BX_CPU_ID, i);
-      BX_TICK1_IF_SINGLE_PROCESSOR();
-
-      // inform instrumentation about new instruction
-      BX_INSTR_NEW_INSTRUCTION(BX_CPU_ID);
+      BX_SYNC_TIME_IF_SINGLE_PROCESSOR(0);
 
       // note instructions generating exceptions never reach this point
 #if BX_DEBUGGER || BX_GDBSTUB
@@ -157,12 +159,7 @@ void BX_CPU_C::cpu_loop(Bit32u max_instr_count)
 
       CHECK_MAX_INSTRUCTIONS(max_instr_count);
 
-#if BX_SUPPORT_TRACE_CACHE
-      if (BX_CPU_THIS_PTR async_event) {
-        // clear stop trace magic indication that probably was set by repeat or branch32/64
-        BX_CPU_THIS_PTR async_event &= ~BX_ASYNC_EVENT_STOP_TRACE;
-        break;
-      }
+      if (BX_CPU_THIS_PTR async_event) break;
 
       if (++i == last) {
         entry = getICacheEntry();
@@ -171,6 +168,10 @@ void BX_CPU_C::cpu_loop(Bit32u max_instr_count)
       }
     }
 #endif
+
+    // clear stop trace magic indication that probably was set by repeat or branch32/64
+    BX_CPU_THIS_PTR async_event &= ~BX_ASYNC_EVENT_STOP_TRACE;
+
   }  // while (1)
 }
 
@@ -194,17 +195,19 @@ bxICacheEntry_c* BX_CPU_C::getICacheEntry(void)
     // iCache miss. No validated instruction with matching fetch parameters
     // is in the iCache.
     InstrICache_Increment(iCacheMisses);
-    serveICacheMiss(entry, (Bit32u) eipBiased, pAddr);
+    entry = serveICacheMiss(entry, (Bit32u) eipBiased, pAddr);
   }
 
   return entry;
 }
 
-void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR execute)
+#define BX_REPEAT_TIME_UPDATE_INTERVAL 15
+
+void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxRepIterationPtr_tR execute)
 {
   // non repeated instruction
   if (! i->repUsedL()) {
-    BX_CPU_CALL_METHOD(execute, (i));
+    BX_CPU_CALL_REP_ITERATION(execute, (i));
     return;
   }
 
@@ -216,7 +219,7 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR
   if (i->as64L()) {
     while(1) {
       if (RCX != 0) {
-        BX_CPU_CALL_METHOD(execute, (i));
+        BX_CPU_CALL_REP_ITERATION(execute, (i));
         BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
         RCX --;
       }
@@ -227,7 +230,10 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR
 #endif
         break; // exit always if debugger enabled
 
-      BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+      BX_CPU_THIS_PTR icount++;
+#endif
+      BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
     }
   }
   else
@@ -235,7 +241,7 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR
   if (i->as32L()) {
     while(1) {
       if (ECX != 0) {
-        BX_CPU_CALL_METHOD(execute, (i));
+        BX_CPU_CALL_REP_ITERATION(execute, (i));
         BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
         RCX = ECX - 1;
       }
@@ -246,14 +252,17 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR
 #endif
         break; // exit always if debugger enabled
 
-      BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+      BX_CPU_THIS_PTR icount++;
+#endif
+      BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
     }
   }
   else  // 16bit addrsize
   {
     while(1) {
       if (CX != 0) {
-        BX_CPU_CALL_METHOD(execute, (i));
+        BX_CPU_CALL_REP_ITERATION(execute, (i));
         BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
         CX --;
       }
@@ -264,7 +273,10 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR
 #endif
         break; // exit always if debugger enabled
 
-      BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+      BX_CPU_THIS_PTR icount++;
+#endif
+      BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
     }
   }
 
@@ -274,19 +286,17 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat(bxInstruction_c *i, BxExecutePtr_tR
 
   RIP = BX_CPU_THIS_PTR prev_rip; // repeat loop not done, restore RIP
 
-#if BX_SUPPORT_TRACE_CACHE
   // assert magic async_event to stop trace execution
   BX_CPU_THIS_PTR async_event |= BX_ASYNC_EVENT_STOP_TRACE;
-#endif
 }
 
-void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr_tR execute)
+void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxRepIterationPtr_tR execute)
 {
   unsigned rep = i->repUsedValue();
 
   // non repeated instruction
   if (! rep) {
-    BX_CPU_CALL_METHOD(execute, (i));
+    BX_CPU_CALL_REP_ITERATION(execute, (i));
     return;
   }
 
@@ -299,7 +309,7 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
     if (i->as64L()) {
       while(1) {
         if (RCX != 0) {
-          BX_CPU_CALL_METHOD(execute, (i));
+          BX_CPU_CALL_REP_ITERATION(execute, (i));
           BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
           RCX --;
         }
@@ -310,7 +320,10 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 #endif
           break; // exit always if debugger enabled
 
-        BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+        BX_CPU_THIS_PTR icount++;
+#endif
+        BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
       }
     }
     else
@@ -318,7 +331,7 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
     if (i->as32L()) {
       while(1) {
         if (ECX != 0) {
-          BX_CPU_CALL_METHOD(execute, (i));
+          BX_CPU_CALL_REP_ITERATION(execute, (i));
           BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
           RCX = ECX - 1;
         }
@@ -329,14 +342,17 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 #endif
           break; // exit always if debugger enabled
 
-        BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+        BX_CPU_THIS_PTR icount++;
+#endif
+        BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
       }
     }
     else  // 16bit addrsize
     {
       while(1) {
         if (CX != 0) {
-          BX_CPU_CALL_METHOD(execute, (i));
+          BX_CPU_CALL_REP_ITERATION(execute, (i));
           BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
           CX --;
         }
@@ -347,7 +363,10 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 #endif
           break; // exit always if debugger enabled
 
-        BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+        BX_CPU_THIS_PTR icount++;
+#endif
+        BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
       }
     }
   }
@@ -356,7 +375,7 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
     if (i->as64L()) {
       while(1) {
         if (RCX != 0) {
-          BX_CPU_CALL_METHOD(execute, (i));
+          BX_CPU_CALL_REP_ITERATION(execute, (i));
           BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
           RCX --;
         }
@@ -367,7 +386,10 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 #endif
           break; // exit always if debugger enabled
 
-        BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+        BX_CPU_THIS_PTR icount++;
+#endif
+        BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
       }
     }
     else
@@ -375,7 +397,7 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
     if (i->as32L()) {
       while(1) {
         if (ECX != 0) {
-          BX_CPU_CALL_METHOD(execute, (i));
+          BX_CPU_CALL_REP_ITERATION(execute, (i));
           BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
           RCX = ECX - 1;
         }
@@ -386,14 +408,17 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 #endif
           break; // exit always if debugger enabled
 
-        BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+        BX_CPU_THIS_PTR icount++;
+#endif
+        BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
       }
     }
     else  // 16bit addrsize
     {
       while(1) {
         if (CX != 0) {
-          BX_CPU_CALL_METHOD(execute, (i));
+          BX_CPU_CALL_REP_ITERATION(execute, (i));
           BX_INSTR_REPEAT_ITERATION(BX_CPU_ID, i);
           CX --;
         }
@@ -404,7 +429,10 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 #endif
           break; // exit always if debugger enabled
 
-        BX_TICK1_IF_SINGLE_PROCESSOR();
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+        BX_CPU_THIS_PTR icount++;
+#endif
+        BX_SYNC_TIME_IF_SINGLE_PROCESSOR(BX_REPEAT_TIME_UPDATE_INTERVAL);
       }
     }
   }
@@ -415,10 +443,8 @@ void BX_CPP_AttrRegparmN(2) BX_CPU_C::repeat_ZF(bxInstruction_c *i, BxExecutePtr
 
   RIP = BX_CPU_THIS_PTR prev_rip; // repeat loop not done, restore RIP
 
-#if BX_SUPPORT_TRACE_CACHE
   // assert magic async_event to stop trace execution
   BX_CPU_THIS_PTR async_event |= BX_ASYNC_EVENT_STOP_TRACE;
-#endif
 }
 
 unsigned BX_CPU_C::handleAsyncEvent(void)
@@ -431,8 +457,10 @@ unsigned BX_CPU_C::handleAsyncEvent(void)
     // an interrupt wakes up the CPU.
     while (1)
     {
-      if ((BX_CPU_INTR && (BX_CPU_THIS_PTR get_IF() || 
-          (BX_CPU_THIS_PTR activity_state == BX_ACTIVITY_STATE_MWAIT_IF))) ||
+      if ((BX_CPU_INTR && (BX_CPU_THIS_PTR get_IF() || BX_CPU_THIS_PTR activity_state == BX_ACTIVITY_STATE_MWAIT_IF)) ||
+#if BX_SUPPORT_VMX >= 2
+           BX_CPU_THIS_PTR pending_vmx_timer_expired ||
+#endif
            BX_CPU_THIS_PTR pending_NMI || BX_CPU_THIS_PTR pending_SMI || BX_CPU_THIS_PTR pending_INIT)
       {
         // interrupt ends the HALT condition
@@ -515,20 +543,44 @@ unsigned BX_CPU_C::handleAsyncEvent(void)
     }
 #endif
     // reset will clear pending INIT
-    BX_CPU_THIS_PTR reset(BX_RESET_SOFTWARE);
+    reset(BX_RESET_SOFTWARE);
+
+#if BX_SUPPORT_SMP
+    if (BX_SMP_PROCESSORS > 1) {
+      // if HALT condition remains, return so other CPUs have a chance
+      if (BX_CPU_THIS_PTR activity_state) {
+#if BX_DEBUGGER
+        BX_CPU_THIS_PTR stop_reason = STOP_CPU_HALTED;
+#endif
+        return 1; // Return to caller of cpu_loop.
+      }
+    }
+#endif
   }
 
   // Priority 4: Traps on Previous Instruction
   //   Breakpoints
   //   Debug Trap Exceptions (TF flag set or data/IO breakpoint)
-  if (BX_CPU_THIS_PTR debug_trap &&
-       !(BX_CPU_THIS_PTR inhibit_mask & BX_INHIBIT_DEBUG_SHADOW))
-  {
+  if (! (BX_CPU_THIS_PTR inhibit_mask & BX_INHIBIT_DEBUG_SHADOW)) {
     // A trap may be inhibited on this boundary due to an instruction
     // which loaded SS.  If so we clear the inhibit_mask below
     // and don't execute this code until the next boundary.
-    exception(BX_DB_EXCEPTION, 0); // no error, not interrupt
+#if BX_X86_DEBUGGER
+    code_breakpoint_match(get_laddr(BX_SEG_REG_CS, BX_CPU_THIS_PTR prev_rip));
+#endif
+    if (BX_CPU_THIS_PTR debug_trap)
+      exception(BX_DB_EXCEPTION, 0); // no error, not interrupt
   }
+  
+  // Priority 4.5: VMX Preemption Timer Expired. FIXME: is it a kind of external interrupt?
+#if BX_SUPPORT_VMX >= 2
+  if (BX_CPU_THIS_PTR in_vmx_guest) {
+    if (BX_CPU_THIS_PTR pending_vmx_timer_expired) {
+      BX_CPU_THIS_PTR pending_vmx_timer_expired = 0;
+      VMexit_PreemptionTimerExpired();
+    }
+  }
+#endif
 
   // Priority 5: External Interrupts
   //   NMI Interrupts
@@ -606,27 +658,6 @@ unsigned BX_CPU_C::handleAsyncEvent(void)
     DEV_dma_raise_hlda();
   }
 
-  // Priority 6: Faults from fetching next instruction
-  //   Code breakpoint fault
-  //   Code segment limit violation (priority 7 on 486/Pentium)
-  //   Code page fault (priority 7 on 486/Pentium)
-  // (handled in main decode loop)
-
-  // Now we can handle things which are synchronous to instruction
-  // execution.
-  if (BX_CPU_THIS_PTR get_RF()) {
-    BX_CPU_THIS_PTR clear_RF();
-  }
-#if BX_X86_DEBUGGER
-  else {
-    // only bother comparing if any breakpoints enabled and
-    // debug events are not inhibited on this boundary.
-    if (! (BX_CPU_THIS_PTR inhibit_mask & BX_INHIBIT_DEBUG_SHADOW) && ! BX_CPU_THIS_PTR in_repeat) {
-      code_breakpoint_match(get_laddr(BX_SEG_REG_CS, BX_CPU_THIS_PTR prev_rip));
-    }
-  }
-#endif
-
   if (BX_CPU_THIS_PTR get_TF())
   {
     // TF is set before execution of next instruction.  Schedule
@@ -634,6 +665,12 @@ unsigned BX_CPU_C::handleAsyncEvent(void)
     // next instruction, the code above will invoke the trap.
     BX_CPU_THIS_PTR debug_trap |= BX_DEBUG_SINGLE_STEP_BIT;
   }
+
+  // Priority 6: Faults from fetching next instruction
+  //   Code breakpoint fault
+  //   Code segment limit violation (priority 7 on 486/Pentium)
+  //   Code page fault (priority 7 on 486/Pentium)
+  // (handled in main decode loop)
 
   // Priority 7: Faults from decoding next instruction
   //   Instruction length > 15 bytes
@@ -660,13 +697,12 @@ unsigned BX_CPU_C::handleAsyncEvent(void)
 #if BX_SUPPORT_VMX
      || BX_CPU_THIS_PTR vmx_interrupt_window || BX_CPU_THIS_PTR inhibit_mask
 #endif
+#if BX_SUPPORT_VMX >= 2
+     || BX_CPU_THIS_PTR pending_vmx_timer_expired
+#endif
 #if BX_X86_DEBUGGER
-       // any debug code breakpoint is set
-     || (BX_CPU_THIS_PTR dr7.get_bp_enabled() &&
-           (BX_CPU_THIS_PTR dr7.get_R_W0() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W1() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W2() == 0 ||
-            BX_CPU_THIS_PTR dr7.get_R_W3() == 0))
+     // a debug code breakpoint is set in current page
+     || BX_CPU_THIS_PTR codebp
 #endif
         ))
     BX_CPU_THIS_PTR async_event = 0;
@@ -725,6 +761,29 @@ void BX_CPU_C::prefetch(void)
     }
   }
 
+#if BX_X86_DEBUGGER
+  if (hwbreakpoint_check(laddr, BX_HWDebugInstruction, BX_HWDebugInstruction)) {
+    BX_CPU_THIS_PTR async_event = 1;
+    BX_CPU_THIS_PTR codebp = 1;
+    if (! (BX_CPU_THIS_PTR inhibit_mask & BX_INHIBIT_DEBUG_SHADOW)) {
+       // The next instruction could already hit a code breakpoint but
+       // async_event won't take effect immediatelly.
+       // Check if the next executing instruction hits code breakpoint
+
+       // check only if not fetching page cross instruction
+       // this check is 32-bit wrap safe as well
+       if (EIP == (Bit32u) BX_CPU_THIS_PTR prev_rip) {
+         if (code_breakpoint_match(laddr)) exception(BX_DB_EXCEPTION, 0);
+       }
+    }
+  }
+  else {
+    BX_CPU_THIS_PTR codebp = 0;
+  }
+#endif
+
+  BX_CPU_THIS_PTR clear_RF();
+
   bx_address lpf = LPFOf(laddr);
   unsigned TLB_index = BX_TLB_INDEX_OF(lpf, 0);
   bx_TLB_entry *tlbEntry = &BX_CPU_THIS_PTR TLB.entry[TLB_index];
@@ -735,7 +794,7 @@ void BX_CPU_C::prefetch(void)
     fetchPtr = (Bit8u*) tlbEntry->hostPageAddr;
   }  
   else {
-    bx_phy_address pAddr = translate_linear(laddr, CPL, BX_EXECUTE);
+    bx_phy_address pAddr = translate_linear(laddr, USER_PL, BX_EXECUTE);
     BX_CPU_THIS_PTR pAddrPage = PPFOf(pAddr);
   }
 
@@ -806,7 +865,8 @@ bx_bool BX_CPU_C::dbg_instruction_epilog(void)
   bx_address debug_eip = RIP;
   Bit16u cs = BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].selector.value;
 
-  BX_CPU_THIS_PTR guard_found.icount++;
+  BX_CPU_THIS_PTR icount++;
+
   BX_CPU_THIS_PTR guard_found.cs  = cs;
   BX_CPU_THIS_PTR guard_found.eip = debug_eip;
   BX_CPU_THIS_PTR guard_found.laddr = BX_CPU_THIS_PTR get_laddr(BX_SEG_REG_CS, debug_eip);
@@ -842,6 +902,13 @@ bx_bool BX_CPU_C::dbg_instruction_epilog(void)
     return(1); // on a breakpoint
   }
 
+  // see if debugger requesting icount guard 
+  if (bx_guard.guard_for & BX_DBG_GUARD_ICOUNT) {
+    if (BX_CPU_THIS_PTR icount >= BX_CPU_THIS_PTR guard_found.icount_max) {
+      return(1);
+    }
+  }
+
   // convenient point to see if user requested debug break or typed Ctrl-C
   if (bx_guard.interrupt_requested) {
     return(1);
@@ -866,7 +933,6 @@ bx_bool BX_CPU_C::dbg_instruction_epilog(void)
         {
           BX_CPU_THIS_PTR guard_found.guard_found = BX_DBG_GUARD_IADDR_VIR;
           BX_CPU_THIS_PTR guard_found.iaddr_index = n;
-          BX_CPU_THIS_PTR guard_found.time_tick = tt;
           return(1); // on a breakpoint
         }
       }
@@ -880,7 +946,6 @@ bx_bool BX_CPU_C::dbg_instruction_epilog(void)
         {
           BX_CPU_THIS_PTR guard_found.guard_found = BX_DBG_GUARD_IADDR_LIN;
           BX_CPU_THIS_PTR guard_found.iaddr_index = n;
-          BX_CPU_THIS_PTR guard_found.time_tick = tt;
           return(1); // on a breakpoint
         }
       }
@@ -896,7 +961,6 @@ bx_bool BX_CPU_C::dbg_instruction_epilog(void)
           {
             BX_CPU_THIS_PTR guard_found.guard_found = BX_DBG_GUARD_IADDR_PHY;
             BX_CPU_THIS_PTR guard_found.iaddr_index = n;
-            BX_CPU_THIS_PTR guard_found.time_tick = tt;
             return(1); // on a breakpoint
           }
         }

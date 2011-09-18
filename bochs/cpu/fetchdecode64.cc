@@ -296,9 +296,9 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 9A /w */ { 0, BX_IA_ERROR },
   /* 9B /w */ { 0, BX_IA_FWAIT },
   /* 9C /w */ { 0, BX_IA_PUSHF_Fw },
-  /* 9D /w */ { 0, BX_IA_POPF_Fw },
-  /* 9E /w */ { 0, BX_IA_SAHF },
-  /* 9F /w */ { 0, BX_IA_LAHF },
+  /* 9D /w */ { BxTraceEnd, BX_IA_POPF_Fw },
+  /* 9E /w */ { 0, BX_IA_LM_SAHF },
+  /* 9F /w */ { 0, BX_IA_LM_LAHF },
   /* A0 /w */ { BxImmediate_O, BX_IA_MOV_ALOq },
   /* A1 /w */ { BxImmediate_O, BX_IA_MOV_AXOq },
   /* A2 /w */ { BxImmediate_O, BX_IA_MOV_OqAL },
@@ -402,7 +402,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 03 /w */ { 0, BX_IA_LSL_GvEw },
   /* 0F 04 /w */ { 0, BX_IA_ERROR },
   /* 0F 05 /w */ { BxTraceEnd, BX_IA_SYSCALL },
-  /* 0F 06 /w */ { 0, BX_IA_CLTS },
+  /* 0F 06 /w */ { BxTraceEnd, BX_IA_CLTS },
   /* 0F 07 /w */ { BxTraceEnd, BX_IA_SYSRET },
   /* 0F 08 /w */ { BxTraceEnd, BX_IA_INVD },
   /* 0F 09 /w */ { BxTraceEnd, BX_IA_WBINVD },
@@ -445,13 +445,13 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 2E /w */ { BxPrefixSSE, BX_IA_UCOMISS_VssWss, BxOpcodeGroupSSE_0f2e },
   /* 0F 2F /w */ { BxPrefixSSE, BX_IA_COMISS_VpsWps, BxOpcodeGroupSSE_0f2f },
   /* 0F 30 /w */ { 0, BX_IA_WRMSR },
-  /* 0F 31 /w */ { 0, BX_IA_RDTSC },
+  /* 0F 31 /w */ { BxTraceEnd, BX_IA_RDTSC }, // end trace to avoid multiple TSC samples in one cycle
   /* 0F 32 /w */ { 0, BX_IA_RDMSR },
   /* 0F 33 /w */ { 0, BX_IA_RDPMC },
   /* 0F 34 /w */ { BxTraceEnd, BX_IA_SYSENTER },
   /* 0F 35 /w */ { BxTraceEnd, BX_IA_SYSEXIT },
   /* 0F 36 /w */ { 0, BX_IA_ERROR },
-  /* 0F 37 /w */ { 0, BX_IA_ERROR },
+  /* 0F 37 /w */ { 0, BX_IA_GETSEC },
   /* 0F 38 /w */ { Bx3ByteOp, BX_IA_ERROR, BxOpcode3ByteTable0f38 }, // 3-byte escape
   /* 0F 39 /w */ { 0, BX_IA_ERROR },
   /* 0F 3A /w */ { Bx3ByteOp | BxImmediate_Ib, BX_IA_ERROR, BxOpcode3ByteTable0f3a }, // 3-byte escape
@@ -486,7 +486,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 57 /w */ { BxPrefixSSE, BX_IA_XORPS_VpsWps, BxOpcodeGroupSSE_0f57 },
   /* 0F 58 /w */ { BxPrefixSSE, BX_IA_ADDPS_VpsWps, BxOpcodeGroupSSE_0f58 },
   /* 0F 59 /w */ { BxPrefixSSE, BX_IA_MULPS_VpsWps, BxOpcodeGroupSSE_0f59 },
-  /* 0F 5A /w */ { BxPrefixSSE, BX_IA_CVTPS2PD_VpsWps, BxOpcodeGroupSSE_0f5a },
+  /* 0F 5A /w */ { BxPrefixSSE, BX_IA_CVTPS2PD_VpdWps, BxOpcodeGroupSSE_0f5a },
   /* 0F 5B /w */ { BxPrefixSSE, BX_IA_CVTDQ2PS_VpsWdq, BxOpcodeGroupSSE_0f5b },
   /* 0F 5C /w */ { BxPrefixSSE, BX_IA_SUBPS_VpsWps, BxOpcodeGroupSSE_0f5c },
   /* 0F 5D /w */ { BxPrefixSSE, BX_IA_MINPS_VpsWps, BxOpcodeGroupSSE_0f5d },
@@ -516,14 +516,14 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 75 /w */ { BxPrefixSSE, BX_IA_PCMPEQW_PqQq, BxOpcodeGroupSSE_0f75 },
   /* 0F 76 /w */ { BxPrefixSSE, BX_IA_PCMPEQD_PqQq, BxOpcodeGroupSSE_0f76 },
   /* 0F 77 /w */ { BxPrefixSSE, BX_IA_EMMS, BxOpcodeGroupSSE_ERR },
-  /* 0F 78 /w */ { BxPrefixSSE, BX_IA_VMREAD_EqGq, BxOpcodeGroupSSE_ERR },
-  /* 0F 79 /w */ { BxPrefixSSE, BX_IA_VMWRITE_GqEq, BxOpcodeGroupSSE_ERR },
+  /* 0F 78 /w */ { BxPrefixSSE, BX_IA_VMREAD_EqGq, BxOpcodeGroupSSE4A_0f78 },
+  /* 0F 79 /w */ { BxPrefixSSE, BX_IA_VMWRITE_GqEq, BxOpcodeGroupSSE4A_0f79 },
   /* 0F 7A /w */ { 0, BX_IA_ERROR },
   /* 0F 7B /w */ { 0, BX_IA_ERROR },
   /* 0F 7C /w */ { BxPrefixSSE, BX_IA_ERROR, BxOpcodeGroupSSE_0f7c },
   /* 0F 7D /w */ { BxPrefixSSE, BX_IA_ERROR, BxOpcodeGroupSSE_0f7d },
   /* 0F 7E /w */ { BxPrefixSSE, BX_IA_MOVD_EdPd, BxOpcodeGroupSSE_0f7e },
-  /* 0F 7F /w */ { BxPrefixSSE, BX_IA_MOVQ_QqPq, BxOpcodeGroupSSE_0f7f },
+  /* 0F 7F /w */ { BxPrefixSSE | BxArithDstRM, BX_IA_MOVQ_QqPq, BxOpcodeGroupSSE_0f7f },
   /* 0F 80 /w */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JO_Jq },
   /* 0F 81 /w */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JNO_Jq },
   /* 0F 82 /w */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JB_Jq },
@@ -584,8 +584,8 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F B9 /w */ { BxTraceEnd, BX_IA_UD2B },
   /* 0F BA /w */ { BxGroup8, BX_IA_ERROR, BxOpcodeInfoG8EwIb },
   /* 0F BB /w */ { BxLockable, BX_IA_BTC_EwGw },
-  /* 0F BC /w */ { 0, BX_IA_BSF_GwEw },
-  /* 0F BD /w */ { 0, BX_IA_BSR_GwEw },
+  /* 0F BC /w */ { BxPrefixSSE, BX_IA_BSF_GwEw, BxOpcodeGroupSSE_TZCNT16 },
+  /* 0F BD /w */ { BxPrefixSSE, BX_IA_BSR_GwEw, BxOpcodeGroupSSE_LZCNT16 },
   /* 0F BE /w */ { 0, BX_IA_MOVSX_GwEb },
   /* 0F BF /w */ { 0, BX_IA_MOV_GwEw }, // MOVSX_GwEw
   /* 0F C0 /w */ { BxLockable, BX_IA_XADD_EbGb },
@@ -811,9 +811,9 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 9A /d */ { 0, BX_IA_ERROR },
   /* 9B /d */ { 0, BX_IA_FWAIT },
   /* 9C /d */ { 0, BX_IA_PUSHF_Fq },
-  /* 9D /d */ { 0, BX_IA_POPF_Fq },
-  /* 9E /d */ { 0, BX_IA_SAHF },
-  /* 9F /d */ { 0, BX_IA_LAHF },
+  /* 9D /d */ { BxTraceEnd, BX_IA_POPF_Fq },
+  /* 9E /d */ { 0, BX_IA_LM_SAHF },
+  /* 9F /d */ { 0, BX_IA_LM_LAHF },
   /* A0 /d */ { BxImmediate_O, BX_IA_MOV_ALOq },
   /* A1 /d */ { BxImmediate_O, BX_IA_MOV_EAXOq },
   /* A2 /d */ { BxImmediate_O, BX_IA_MOV_OqAL },
@@ -917,7 +917,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 03 /d */ { 0, BX_IA_LSL_GvEw },
   /* 0F 04 /d */ { 0, BX_IA_ERROR },
   /* 0F 05 /d */ { BxTraceEnd, BX_IA_SYSCALL },
-  /* 0F 06 /d */ { 0, BX_IA_CLTS },
+  /* 0F 06 /d */ { BxTraceEnd, BX_IA_CLTS },
   /* 0F 07 /d */ { BxTraceEnd, BX_IA_SYSRET },
   /* 0F 08 /d */ { BxTraceEnd, BX_IA_INVD },
   /* 0F 09 /d */ { BxTraceEnd, BX_IA_WBINVD },
@@ -960,13 +960,13 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 2E /d */ { BxPrefixSSE, BX_IA_UCOMISS_VssWss, BxOpcodeGroupSSE_0f2e },
   /* 0F 2F /d */ { BxPrefixSSE, BX_IA_COMISS_VpsWps, BxOpcodeGroupSSE_0f2f },
   /* 0F 30 /d */ { 0, BX_IA_WRMSR },
-  /* 0F 31 /d */ { 0, BX_IA_RDTSC },
+  /* 0F 31 /d */ { BxTraceEnd, BX_IA_RDTSC }, // end trace to avoid multiple TSC samples in one cycle
   /* 0F 32 /d */ { 0, BX_IA_RDMSR },
   /* 0F 33 /d */ { 0, BX_IA_RDPMC },
   /* 0F 34 /d */ { BxTraceEnd, BX_IA_SYSENTER },
   /* 0F 35 /d */ { BxTraceEnd, BX_IA_SYSEXIT },
   /* 0F 36 /d */ { 0, BX_IA_ERROR },
-  /* 0F 37 /d */ { 0, BX_IA_ERROR },
+  /* 0F 37 /d */ { 0, BX_IA_GETSEC },
   /* 0F 38 /d */ { Bx3ByteOp, BX_IA_ERROR, BxOpcode3ByteTable0f38 }, // 3-byte escape
   /* 0F 39 /d */ { 0, BX_IA_ERROR },
   /* 0F 3A /d */ { Bx3ByteOp | BxImmediate_Ib, BX_IA_ERROR, BxOpcode3ByteTable0f3a }, // 3-byte escape
@@ -1001,7 +1001,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 57 /d */ { BxPrefixSSE, BX_IA_XORPS_VpsWps, BxOpcodeGroupSSE_0f57 },
   /* 0F 58 /d */ { BxPrefixSSE, BX_IA_ADDPS_VpsWps, BxOpcodeGroupSSE_0f58 },
   /* 0F 59 /d */ { BxPrefixSSE, BX_IA_MULPS_VpsWps, BxOpcodeGroupSSE_0f59 },
-  /* 0F 5A /d */ { BxPrefixSSE, BX_IA_CVTPS2PD_VpsWps, BxOpcodeGroupSSE_0f5a },
+  /* 0F 5A /d */ { BxPrefixSSE, BX_IA_CVTPS2PD_VpdWps, BxOpcodeGroupSSE_0f5a },
   /* 0F 5B /d */ { BxPrefixSSE, BX_IA_CVTDQ2PS_VpsWdq, BxOpcodeGroupSSE_0f5b },
   /* 0F 5C /d */ { BxPrefixSSE, BX_IA_SUBPS_VpsWps, BxOpcodeGroupSSE_0f5c },
   /* 0F 5D /d */ { BxPrefixSSE, BX_IA_MINPS_VpsWps, BxOpcodeGroupSSE_0f5d },
@@ -1031,14 +1031,14 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 75 /d */ { BxPrefixSSE, BX_IA_PCMPEQW_PqQq, BxOpcodeGroupSSE_0f75 },
   /* 0F 76 /d */ { BxPrefixSSE, BX_IA_PCMPEQD_PqQq, BxOpcodeGroupSSE_0f76 },
   /* 0F 77 /d */ { BxPrefixSSE, BX_IA_EMMS, BxOpcodeGroupSSE_ERR },
-  /* 0F 78 /d */ { BxPrefixSSE, BX_IA_VMREAD_EqGq, BxOpcodeGroupSSE_ERR },
-  /* 0F 79 /d */ { BxPrefixSSE, BX_IA_VMWRITE_GqEq, BxOpcodeGroupSSE_ERR },
+  /* 0F 78 /d */ { BxPrefixSSE, BX_IA_VMREAD_EqGq, BxOpcodeGroupSSE4A_0f78 },
+  /* 0F 79 /d */ { BxPrefixSSE, BX_IA_VMWRITE_GqEq, BxOpcodeGroupSSE4A_0f79 },
   /* 0F 7A /d */ { 0, BX_IA_ERROR },
   /* 0F 7B /d */ { 0, BX_IA_ERROR },
   /* 0F 7C /d */ { BxPrefixSSE, BX_IA_ERROR, BxOpcodeGroupSSE_0f7c },
   /* 0F 7D /d */ { BxPrefixSSE, BX_IA_ERROR, BxOpcodeGroupSSE_0f7d },
   /* 0F 7E /d */ { BxPrefixSSE, BX_IA_MOVD_EdPd, BxOpcodeGroupSSE_0f7e },
-  /* 0F 7F /d */ { BxPrefixSSE, BX_IA_MOVQ_QqPq, BxOpcodeGroupSSE_0f7f },
+  /* 0F 7F /d */ { BxPrefixSSE | BxArithDstRM, BX_IA_MOVQ_QqPq, BxOpcodeGroupSSE_0f7f },
   /* 0F 80 /d */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JO_Jq },
   /* 0F 81 /d */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JNO_Jq },
   /* 0F 82 /d */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JB_Jq },
@@ -1099,8 +1099,8 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F B9 /d */ { BxTraceEnd, BX_IA_UD2B },
   /* 0F BA /d */ { BxGroup8, BX_IA_ERROR, BxOpcodeInfoG8EdIb },
   /* 0F BB /d */ { BxLockable, BX_IA_BTC_EdGd },
-  /* 0F BC /d */ { 0, BX_IA_BSF_GdEd },
-  /* 0F BD /d */ { 0, BX_IA_BSR_GdEd },
+  /* 0F BC /d */ { BxPrefixSSE, BX_IA_BSF_GdEd, BxOpcodeGroupSSE_TZCNT32 },
+  /* 0F BD /d */ { BxPrefixSSE, BX_IA_BSR_GdEd, BxOpcodeGroupSSE_LZCNT32 },
   /* 0F BE /d */ { 0, BX_IA_MOVSX_GdEb },
   /* 0F BF /d */ { 0, BX_IA_MOVSX_GdEw },
   /* 0F C0 /d */ { BxLockable, BX_IA_XADD_EbGb },
@@ -1326,9 +1326,9 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 9A /q */ { 0, BX_IA_ERROR },
   /* 9B /q */ { 0, BX_IA_FWAIT },
   /* 9C /q */ { 0, BX_IA_PUSHF_Fq },
-  /* 9D /q */ { 0, BX_IA_POPF_Fq },
-  /* 9E /q */ { 0, BX_IA_SAHF },
-  /* 9F /q */ { 0, BX_IA_LAHF },
+  /* 9D /q */ { BxTraceEnd, BX_IA_POPF_Fq },
+  /* 9E /q */ { 0, BX_IA_LM_SAHF },
+  /* 9F /q */ { 0, BX_IA_LM_LAHF },
   /* A0 /q */ { BxImmediate_O, BX_IA_MOV_ALOq },
   /* A1 /q */ { BxImmediate_O, BX_IA_MOV_RAXOq },
   /* A2 /q */ { BxImmediate_O, BX_IA_MOV_OqAL },
@@ -1432,7 +1432,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 03 /q */ { 0, BX_IA_LSL_GvEw },
   /* 0F 04 /q */ { 0, BX_IA_ERROR },
   /* 0F 05 /q */ { BxTraceEnd, BX_IA_SYSCALL },
-  /* 0F 06 /q */ { 0, BX_IA_CLTS },
+  /* 0F 06 /q */ { BxTraceEnd, BX_IA_CLTS },
   /* 0F 07 /q */ { BxTraceEnd, BX_IA_SYSRET },
   /* 0F 08 /q */ { BxTraceEnd, BX_IA_INVD },
   /* 0F 09 /q */ { BxTraceEnd, BX_IA_WBINVD },
@@ -1475,13 +1475,13 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 2E /q */ { BxPrefixSSE, BX_IA_UCOMISS_VssWss, BxOpcodeGroupSSE_0f2e },
   /* 0F 2F /q */ { BxPrefixSSE, BX_IA_COMISS_VpsWps, BxOpcodeGroupSSE_0f2f },
   /* 0F 30 /q */ { 0, BX_IA_WRMSR },
-  /* 0F 31 /q */ { 0, BX_IA_RDTSC },
+  /* 0F 31 /q */ { BxTraceEnd, BX_IA_RDTSC }, // end trace to avoid multiple TSC samples in one cycle
   /* 0F 32 /q */ { 0, BX_IA_RDMSR },
   /* 0F 33 /q */ { 0, BX_IA_RDPMC },
   /* 0F 34 /q */ { BxTraceEnd, BX_IA_SYSENTER },
   /* 0F 35 /q */ { BxTraceEnd, BX_IA_SYSEXIT },
   /* 0F 36 /q */ { 0, BX_IA_ERROR },
-  /* 0F 37 /q */ { 0, BX_IA_ERROR },
+  /* 0F 37 /q */ { 0, BX_IA_GETSEC },
   /* 0F 38 /q */ { Bx3ByteOp, BX_IA_ERROR, BxOpcode3ByteTable0f38 }, // 3-byte escape
   /* 0F 39 /q */ { 0, BX_IA_ERROR },
   /* 0F 3A /q */ { Bx3ByteOp | BxImmediate_Ib, BX_IA_ERROR, BxOpcode3ByteTable0f3a }, // 3-byte escape
@@ -1516,7 +1516,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 57 /q */ { BxPrefixSSE, BX_IA_XORPS_VpsWps, BxOpcodeGroupSSE_0f57 },
   /* 0F 58 /q */ { BxPrefixSSE, BX_IA_ADDPS_VpsWps, BxOpcodeGroupSSE_0f58 },
   /* 0F 59 /q */ { BxPrefixSSE, BX_IA_MULPS_VpsWps, BxOpcodeGroupSSE_0f59 },
-  /* 0F 5A /q */ { BxPrefixSSE, BX_IA_CVTPS2PD_VpsWps, BxOpcodeGroupSSE_0f5a },
+  /* 0F 5A /q */ { BxPrefixSSE, BX_IA_CVTPS2PD_VpdWps, BxOpcodeGroupSSE_0f5a },
   /* 0F 5B /q */ { BxPrefixSSE, BX_IA_CVTDQ2PS_VpsWdq, BxOpcodeGroupSSE_0f5b },
   /* 0F 5C /q */ { BxPrefixSSE, BX_IA_SUBPS_VpsWps, BxOpcodeGroupSSE_0f5c },
   /* 0F 5D /q */ { BxPrefixSSE, BX_IA_MINPS_VpsWps, BxOpcodeGroupSSE_0f5d },
@@ -1546,14 +1546,14 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 75 /q */ { BxPrefixSSE, BX_IA_PCMPEQW_PqQq, BxOpcodeGroupSSE_0f75 },
   /* 0F 76 /q */ { BxPrefixSSE, BX_IA_PCMPEQD_PqQq, BxOpcodeGroupSSE_0f76 },
   /* 0F 77 /q */ { BxPrefixSSE, BX_IA_EMMS, BxOpcodeGroupSSE_ERR },
-  /* 0F 78 /q */ { BxPrefixSSE, BX_IA_VMREAD_EqGq, BxOpcodeGroupSSE_ERR },
-  /* 0F 79 /q */ { BxPrefixSSE, BX_IA_VMWRITE_GqEq, BxOpcodeGroupSSE_ERR },
+  /* 0F 78 /q */ { BxPrefixSSE, BX_IA_VMREAD_EqGq, BxOpcodeGroupSSE4A_0f78 },
+  /* 0F 79 /q */ { BxPrefixSSE, BX_IA_VMWRITE_GqEq, BxOpcodeGroupSSE4A_0f79 },
   /* 0F 7A /q */ { 0, BX_IA_ERROR },
   /* 0F 7B /q */ { 0, BX_IA_ERROR },
   /* 0F 7C /q */ { BxPrefixSSE, BX_IA_ERROR, BxOpcodeGroupSSE_0f7c },
   /* 0F 7D /q */ { BxPrefixSSE, BX_IA_ERROR, BxOpcodeGroupSSE_0f7d },
   /* 0F 7E /q */ { BxPrefixSSE, BX_IA_MOVQ_EqPq, BxOpcodeGroupSSE_0f7eQ },
-  /* 0F 7F /q */ { BxPrefixSSE, BX_IA_MOVQ_QqPq, BxOpcodeGroupSSE_0f7f },
+  /* 0F 7F /q */ { BxPrefixSSE | BxArithDstRM, BX_IA_MOVQ_QqPq, BxOpcodeGroupSSE_0f7f },
   /* 0F 80 /q */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JO_Jq },
   /* 0F 81 /q */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JNO_Jq },
   /* 0F 82 /q */ { BxImmediate_BrOff32 | BxTraceJCC, BX_IA_JB_Jq },
@@ -1614,8 +1614,8 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F B9 /q */ { BxTraceEnd, BX_IA_UD2B },
   /* 0F BA /q */ { BxGroup8, BX_IA_ERROR, BxOpcodeInfo64G8EqIb },
   /* 0F BB /q */ { BxLockable, BX_IA_BTC_EqGq },
-  /* 0F BC /q */ { 0, BX_IA_BSF_GqEq },
-  /* 0F BD /q */ { 0, BX_IA_BSR_GqEq },
+  /* 0F BC /q */ { BxPrefixSSE, BX_IA_BSF_GqEq, BxOpcodeGroupSSE_TZCNT64 },
+  /* 0F BD /q */ { BxPrefixSSE, BX_IA_BSR_GqEq, BxOpcodeGroupSSE_LZCNT64 },
   /* 0F BE /q */ { 0, BX_IA_MOVSX_GqEb },
   /* 0F BF /q */ { 0, BX_IA_MOVSX_GqEw },
   /* 0F C0 /q */ { BxLockable, BX_IA_XADD_EbGb },
@@ -1703,11 +1703,10 @@ BX_CPU_C::fetchDecode64(const Bit8u *iptr, bxInstruction_c *i, unsigned remainin
   unsigned sse_prefix = SSE_PREFIX_NONE;
   unsigned rex_prefix = 0;
 
-  int had_vex = 0;
-#if BX_SUPPORT_AVX
   int vvv = -1;
-  unsigned vex;
-  bx_bool vex_w = 0;
+#if BX_SUPPORT_AVX
+  int had_vex = 0;
+  bx_bool vex_w = 0, vex_l = 0;
 #endif
 
   i->ResolveModrm = 0;
@@ -1795,6 +1794,7 @@ fetch_b1:
     case 0xf0: // LOCK:
       rex_prefix = 0;
       lock = 1;
+      i->assertLock();
       if (remain != 0) {
         goto fetch_b1;
       }
@@ -1828,7 +1828,7 @@ fetch_b1:
   if ((attr & BxGroupX) == BxPrefixVEX) {
     had_vex = 1;
     if (sse_prefix || rex_prefix) had_vex = -1;
-    unsigned vex_opcext = 1;
+    unsigned vex, vex_opcext = 1;
 
     if (remain != 0) {
       remain--;
@@ -1838,7 +1838,6 @@ fetch_b1:
       return(-1);
 
     rex_r = ((vex >> 4) & 0x8) ^ 0x8;
-
     if (b1 == 0xc4) {
       rex_x = ((vex >> 3) & 0x8) ^ 0x8;
       rex_b = ((vex >> 2) & 0x8) ^ 0x8;
@@ -1860,7 +1859,8 @@ fetch_b1:
     }
 
     vvv = 15 - ((vex >> 3) & 0xf);
-    i->setVL(BX_VL128 + ((vex >> 2) & 0x1));
+    vex_l = (vex >> 2) & 0x1;
+    i->setVL(BX_VL128 + vex_l);
     sse_prefix = vex & 0x3;
 
     if (remain != 0) {
@@ -1871,7 +1871,6 @@ fetch_b1:
       return(-1);
 
     b1 += 256 * vex_opcext;
-
     if (b1 < 256 || b1 >= 1024) had_vex = -1;
     else {
       if (b1 >= 512)
@@ -1914,9 +1913,10 @@ fetch_b1:
 
     i->setNnn(nnn);
 #if BX_SUPPORT_AVX
-    if (had_vex == 0) vvv = nnn;
-    i->setVvv(vvv);
+    if (had_vex == 0)
 #endif
+      vvv = nnn;
+    i->setVvv(vvv);
 
     // MOVs with CRx and DRx always use register ops and ignore the mod field.
     if ((b1 & ~3) == 0x120)
@@ -1939,97 +1939,59 @@ fetch_b1:
     // initialize displ32 with zero to include cases with no diplacement
     i->modRMForm.displ32u = 0;
 
-    if (i->as64L()) {
-      // 64-bit addressing modes; note that mod==11b handled above
+    // note that mod==11b handled above
+    if (i->as64L())
       i->ResolveModrm = &BX_CPU_C::BxResolve64Base;
-      if ((rm & 0x7) != 4) { // no s-i-b byte
-        if (mod == 0x00) { // mod == 00b
-          if ((rm & 0x7) == 5) {
-            i->setSibBase(BX_64BIT_REG_RIP);
-            goto get_32bit_displ;
-          }
-          // mod==00b, rm!=4, rm!=5
-          goto modrm_done;
-        }
-        // (mod == 0x40), mod==01b or (mod == 0x80), mod==10b
-        seg = sreg_mod1or2_base32[rm];
-      }
-      else { // mod!=11b, rm==4, s-i-b byte follows
-        unsigned sib, base, index, scale;
-        if (remain != 0) {
-          sib = *iptr++;
-          remain--;
-        }
-        else {
-          return(-1);
-        }
-        base  = (sib & 0x7) | rex_b; sib >>= 3;
-        index = (sib & 0x7) | rex_x; sib >>= 3;
-        scale =  sib;
-        i->setSibScale(scale);
-        i->setSibBase(base);
-        if (index != 4) {
-          i->ResolveModrm = &BX_CPU_C::BxResolve64BaseIndex;
-          i->setSibIndex(index);
-        }
-        if (mod == 0x00) { // mod==00b, rm==4
-          seg = sreg_mod0_base32[base];
-          if ((base & 0x7) == 5) {
-            i->setSibBase(BX_NIL_REGISTER);
-            goto get_32bit_displ;
-          }
-          // mod==00b, rm==4, base!=5
-          goto modrm_done;
-        }
-        // (mod == 0x40), mod==01b or (mod == 0x80), mod==10b
-        seg = sreg_mod1or2_base32[base];
-      }
-    }
-    else {
-      // 32-bit addressing modes; note that mod==11b handled above
+    else
       i->ResolveModrm = &BX_CPU_C::BxResolve32Base;
-      if ((rm & 0x7) != 4) { // no s-i-b byte
-        if (mod == 0x00) { // mod == 00b
-          if ((rm & 0x7) == 5) {
-            i->setSibBase(BX_32BIT_REG_EIP);
-            goto get_32bit_displ;
-          }
-          // mod==00b, rm!=4, rm!=5
-          goto modrm_done;
+
+    if ((rm & 0x7) != 4) { // no s-i-b byte
+      if (mod == 0x00) { // mod == 00b
+        if ((rm & 0x7) == 5) {
+          i->setSibBase(BX_64BIT_REG_RIP);
+          goto get_32bit_displ;
         }
-        // (mod == 0x40), mod==01b or (mod == 0x80), mod==10b
-        seg = sreg_mod1or2_base32[rm];
+        // mod==00b, rm!=4, rm!=5
+        goto modrm_done;
       }
-      else { // mod!=11b, rm==4, s-i-b byte follows
-        unsigned sib, base, index, scale;
-        if (remain != 0) {
-          sib = *iptr++;
-          remain--;
-        }
-        else {
-          return(-1);
-        }
-        base  = (sib & 0x7) | rex_b; sib >>= 3;
-        index = (sib & 0x7) | rex_x; sib >>= 3;
-        scale =  sib;
-        i->setSibBase(base);
-        i->setSibScale(scale);
-        if (index != 4) {
+      // (mod == 0x40), mod==01b or (mod == 0x80), mod==10b
+      seg = sreg_mod1or2_base32[rm];
+    }
+    else { // mod!=11b, rm==4, s-i-b byte follows
+      unsigned sib, base, index, scale;
+      if (remain != 0) {
+        sib = *iptr++;
+        remain--;
+      }
+      else {
+        return(-1);
+      }
+      base  = (sib & 0x7) | rex_b; sib >>= 3;
+      index = (sib & 0x7) | rex_x; sib >>= 3;
+      scale =  sib;
+      i->setSibScale(scale);
+      i->setSibBase(base);
+      // this part is a little tricky - assign index value always,
+      // it will be really used if the instruction is Gather. Others
+      // assume that BxResolve32Base will do the right thing.
+      i->setSibIndex(index);
+      if (index != 4) {
+        if (i->as64L())
+          i->ResolveModrm = &BX_CPU_C::BxResolve64BaseIndex;
+        else
           i->ResolveModrm = &BX_CPU_C::BxResolve32BaseIndex;
-          i->setSibIndex(index);
-        }
-        if (mod == 0x00) { // mod==00b, rm==4
-          seg = sreg_mod0_base32[base];
-          if ((base & 0x7) == 5) {
-            i->setSibBase(BX_NIL_REGISTER);
-            goto get_32bit_displ;
-          }
-          // mod==00b, rm==4, base!=5
-          goto modrm_done;
-        }
-        // (mod == 0x40), mod==01b or (mod == 0x80), mod==10b
-        seg = sreg_mod1or2_base32[base];
       }
+      if (mod == 0x00) { // mod==00b, rm==4
+        seg = sreg_mod0_base32[base];
+        if ((base & 0x7) == 5) {
+          i->setSibBase(BX_NIL_REGISTER);
+          goto get_32bit_displ;
+        }
+        // mod==00b, rm==4, base!=5
+        goto modrm_done;
+      }
+      // (mod == 0x40), mod==01b or (mod == 0x80), mod==10b
+      seg = sreg_mod1or2_base32[base];
     }
 
     // (mod == 0x40), mod==01b
@@ -2068,7 +2030,7 @@ modrm_done:
       if (had_vex < 0)
          OpcodeInfoPtr = &BxOpcodeGroupSSE_ERR[0]; // BX_IA_ERROR
       else
-         OpcodeInfoPtr = &BxOpcodeTableAVX[b1-256];
+         OpcodeInfoPtr = &BxOpcodeTableAVX[(b1-256) + 768*vex_l];
     }
 #endif
 
@@ -2092,16 +2054,21 @@ modrm_done:
         case BxGroupN:
           OpcodeInfoPtr = &(OpcodeInfoPtr->AnotherArray[nnn & 0x7]);
 #if BX_SUPPORT_AVX
-          if (had_vex == 0) i->setVvv(rm);
+          if (had_vex == 0)
 #endif
+            i->setVvv(rm);
           break;
         case BxSplitGroupN:
           OpcodeInfoPtr = &(OpcodeInfoPtr->AnotherArray[(nnn & 0x7) + (mod_mem << 3)]);
           break;
 #if BX_SUPPORT_AVX
         case BxSplitVexW:
+        case BxSplitVexW64:
           BX_ASSERT(had_vex != 0);
           OpcodeInfoPtr = &(OpcodeInfoPtr->AnotherArray[vex_w]);
+          break;
+        case BxSplitMod11B:
+          OpcodeInfoPtr = &(OpcodeInfoPtr->AnotherArray[mod_mem]);
           break;
 #endif
         case Bx3ByteOp:
@@ -2148,7 +2115,7 @@ modrm_done:
       if (had_vex < 0)
          OpcodeInfoPtr = &BxOpcodeGroupSSE_ERR[0]; // BX_IA_ERROR
       else
-         OpcodeInfoPtr = &BxOpcodeTableAVX[b1-256];
+         OpcodeInfoPtr = &BxOpcodeTableAVX[(b1-256) + 768*vex_l];
     }
 #endif
 
@@ -2167,11 +2134,16 @@ modrm_done:
 
   if (lock) { // lock prefix invalid opcode
     // lock prefix not allowed or destination operand is not memory
-    // mod == 0xc0 can't be BxLockable in fetchdecode tables
     if (!mod_mem || !(attr & BxLockable)) {
-      BX_INFO(("LOCK prefix unallowed (op1=0x%x, modrm=0x%02x)", b1, b2));
-      // replace execution function with undefined-opcode
-      ia_opcode = BX_IA_ERROR;
+      if (BX_CPUID_SUPPORT_CPU_EXTENSION(BX_CPU_ALT_MOV_CR8) && 
+         (ia_opcode == BX_IA_MOV_CR0Rq || ia_opcode == BX_IA_MOV_RqCR0)) {
+        i->setNnn(8); // extend CR0 -> CR8
+      }
+      else {
+        BX_INFO(("LOCK prefix unallowed (op1=0x%x, modrm=0x%02x)", b1, b2));
+        // replace execution function with undefined-opcode
+        ia_opcode = BX_IA_ERROR;
+      }
     }
   }
 
@@ -2200,6 +2172,16 @@ modrm_done:
             i->modRMForm.Id = (Bit32s) temp8s;
           else
             i->modRMForm.Iw = (Bit16s) temp8s;
+          remain--;
+        }
+        else {
+          return(-1);
+        }
+        break;
+      case BxImmediate_BrOff8:
+        if (remain != 0) {
+          Bit8s temp8s = *iptr;
+          i->modRMForm.Id = (Bit32s) temp8s;
           remain--;
         }
         else {
@@ -2235,16 +2217,6 @@ modrm_done:
           return(-1);
         }
         break;
-      case BxImmediate_BrOff8:
-        if (remain != 0) {
-          Bit8s temp8s = *iptr;
-          i->modRMForm.Id = (Bit32s) temp8s;
-          remain--;
-        }
-        else {
-          return(-1);
-        }
-        break;
       case BxImmediate_O:
         // For instructions which embed the address in the opcode.
         // There is only 64/32-bit addressing available in long64 mode.
@@ -2266,7 +2238,7 @@ modrm_done:
 #if BX_SUPPORT_AVX
       case BxImmediate_Ib4:
         if (remain != 0) {
-          i->modRMForm.Ib = (*iptr++) >> 4;
+          i->modRMForm.Ib = *iptr >> 4;
           remain--;
         }
         else {
@@ -2310,27 +2282,15 @@ modrm_done:
   i->setIaOpcode(ia_opcode);
 
   Bit32u op_flags = BxOpcodesTable[ia_opcode].flags;
-  if (! BX_CPU_THIS_PTR sse_ok) {
-    if (op_flags & BX_PREPARE_SSE) {
-       if (i->execute != &BX_CPU_C::BxError) i->execute = &BX_CPU_C::BxNoSSE;
-       return(1);
-    }
-  }
 #if BX_SUPPORT_AVX
-  if (! BX_CPU_THIS_PTR avx_ok) {
-    if (op_flags & BX_PREPARE_AVX) {
-       if (i->execute != &BX_CPU_C::BxError) i->execute = &BX_CPU_C::BxNoAVX;
-       return(1);
-    }
-  }
   if (had_vex > 0) {
+    if ((attr & BxVexW0) != 0 && vex_w) {
+      ia_opcode = BX_IA_ERROR;
+    }
+    if ((attr & BxVexW1) != 0 && !vex_w) {
+      ia_opcode = BX_IA_ERROR;
+    }
     if ((op_flags & BX_VEX_NO_VVV) && i->vvv() != 0) {
-      ia_opcode = BX_IA_ERROR;
-    }
-    if (i->getVL() == BX_VEX_L128 && !(op_flags & BX_VEX_L128)) {
-      ia_opcode = BX_IA_ERROR;
-    }
-    if (i->getVL() == BX_VEX_L256 && !(op_flags & BX_VEX_L256)) {
       ia_opcode = BX_IA_ERROR;
     }
   }
@@ -2352,10 +2312,23 @@ modrm_done:
 
   BX_ASSERT(i->execute);
 
-#if BX_SUPPORT_TRACE_CACHE
+  if (! BX_CPU_THIS_PTR sse_ok) {
+     if (op_flags & BX_PREPARE_SSE) {
+        if (i->execute != &BX_CPU_C::BxError) i->execute = &BX_CPU_C::BxNoSSE;
+        return(1);
+     }
+  }
+#if BX_SUPPORT_AVX
+  if (! BX_CPU_THIS_PTR avx_ok) {
+    if (op_flags & BX_PREPARE_AVX) {
+       if (i->execute != &BX_CPU_C::BxError) i->execute = &BX_CPU_C::BxNoAVX;
+       return(1);
+    }
+  }
+#endif
+
   if ((attr & BxTraceEnd) || ia_opcode == BX_IA_ERROR)
      return(1);
-#endif
 
   return(0);
 }

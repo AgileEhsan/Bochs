@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2002-2010  The Bochs Project
+//  Copyright (C) 2002-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -81,7 +81,7 @@ typedef struct {
   Bit32u   drq_index;
   Bit8u    current_command;
   Bit8u    multiple_sectors;
-  Bit8u    lba_mode;
+  bx_bool  lba_mode;
   bx_bool  packet_dma;
   Bit8u    mdma_mode;
   Bit8u    udma_mode;
@@ -153,9 +153,11 @@ struct atapi_t
 #if BX_USE_HD_SMF
 #  define BX_HD_SMF  static
 #  define BX_HD_THIS theHardDrive->
+#  define BX_HD_THIS_PTR theHardDrive
 #else
 #  define BX_HD_SMF
 #  define BX_HD_THIS this->
+#  define BX_HD_THIS_PTR this
 #endif
 
 typedef enum {
@@ -168,10 +170,9 @@ public:
   virtual ~bx_hard_drive_c();
   virtual void     init();
   virtual void     reset(unsigned type);
-  virtual Bit32u   get_device_handle(Bit8u channel, Bit8u device);
   virtual Bit32u   get_first_cd_handle(void);
-  virtual unsigned get_cd_media_status(Bit32u handle);
-  virtual unsigned set_cd_media_status(Bit32u handle, unsigned status);
+  virtual bx_bool  get_cd_media_status(Bit32u handle);
+  virtual bx_bool  set_cd_media_status(Bit32u handle, bx_bool status);
 #if BX_SUPPORT_PCI
   virtual bx_bool  bmdma_read_sector(Bit8u channel, Bit8u *buffer, Bit32u *sector_size);
   virtual bx_bool  bmdma_write_sector(Bit8u channel, Bit8u *buffer);
@@ -199,10 +200,13 @@ public:
   static void iolight_timer_handler(void *);
   BX_HD_SMF void iolight_timer(void);
 
+  static void runtime_config_handler(void *);
+  void runtime_config(void);
+
 private:
 
   BX_HD_SMF bx_bool calculate_logical_address(Bit8u channel, Bit64s *sector) BX_CPP_AttrRegparmN(2);
-  BX_HD_SMF void increment_address(Bit8u channel) BX_CPP_AttrRegparmN(1);
+  BX_HD_SMF void increment_address(Bit8u channel, Bit64s *sector) BX_CPP_AttrRegparmN(2);
   BX_HD_SMF void identify_drive(Bit8u channel);
   BX_HD_SMF void identify_ATAPI_drive(Bit8u channel);
   BX_HD_SMF void command_aborted(Bit8u channel, unsigned command);
@@ -218,6 +222,10 @@ private:
   BX_HD_SMF bx_bool ide_read_sector(Bit8u channel, Bit8u *buffer, Bit32u buffer_size);
   BX_HD_SMF bx_bool ide_write_sector(Bit8u channel, Bit8u *buffer, Bit32u buffer_size);
   BX_HD_SMF void lba48_transform(Bit8u channel, bx_bool lba48);
+
+  static Bit64s cdrom_status_handler(bx_param_c *param, int set, Bit64s val);
+  static const char* cdrom_path_handler(bx_param_string_c *param, int set,
+                                        const char *oldval, const char *val, int maxlen);
 
   // FIXME:
   // For each ATA channel we should have one controller struct
@@ -242,6 +250,7 @@ private:
       int statusbar_id;
       int iolight_counter;
       Bit8u device_num; // for ATAPI identify & inquiry
+      bx_bool status_changed;
     } drives[2];
     unsigned drive_select;
 

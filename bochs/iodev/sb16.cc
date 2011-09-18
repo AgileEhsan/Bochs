@@ -108,6 +108,8 @@ bx_sb16_c::~bx_sb16_c(void)
     case 1:
       if (DSP.outputinit != 0)
         BX_SB16_OUTPUT->closewaveoutput();
+      if (DSP.inputinit != 0)
+        BX_SB16_OUTPUT->closewaveinput();
       break;
     case 3:
       if (WAVEDATA != NULL)
@@ -152,7 +154,7 @@ void bx_sb16_c::init(void)
   BX_SB16_THIS loglevel = SIM->get_param_num("loglevel", base)->get();
 
   // let the output functions initialize
-  DEV_sound_init_module("default", &BX_SB16_OUTPUT, BX_SB16_THISP);
+  BX_SB16_OUTPUT = DEV_sound_init_module("default", BX_SB16_THISP);
 
   if (BX_SB16_OUTPUT == NULL)
   {
@@ -161,9 +163,10 @@ void bx_sb16_c::init(void)
     BX_SB16_THIS wavemode = 0;
   }
 
-  DSP.dma.chunk = new Bit8u[BX_SOUND_OUTPUT_WAVEPACKETSIZE];
+  DSP.dma.chunk = new Bit8u[BX_SOUNDLOW_WAVEPACKETSIZE];
   DSP.dma.chunkindex = 0;
   DSP.outputinit = 0;
+  DSP.inputinit = 0;
   MPU.outputinit = 0;
 
   if (DSP.dma.chunk == NULL)
@@ -310,7 +313,7 @@ void bx_sb16_c::register_state(void)
     new bx_shadow_num_c(patch, "bankmsb", &MPU.bankmsb[i]);
     new bx_shadow_num_c(patch, "program", &MPU.program[i]);
   }
-  bx_list_c *dsp = new bx_list_c(list, "dsp", 8);
+  bx_list_c *dsp = new bx_list_c(list, "dsp", 9);
   new bx_shadow_num_c(dsp, "resetport", &DSP.resetport, BASE_HEX);
   new bx_shadow_num_c(dsp, "speaker", &DSP.speaker, BASE_HEX);
   new bx_shadow_num_c(dsp, "prostereo", &DSP.prostereo, BASE_HEX);
@@ -335,7 +338,8 @@ void bx_sb16_c::register_state(void)
   new bx_shadow_num_c(dma, "blocklength", &DSP.dma.blocklength);
   new bx_shadow_num_c(dma, "samplerate", &DSP.dma.samplerate);
   new bx_shadow_bool_c(dsp, "outputinit", &DSP.outputinit);
-  new bx_shadow_data_c(list, "chunk", DSP.dma.chunk, BX_SOUND_OUTPUT_WAVEPACKETSIZE);
+  new bx_shadow_bool_c(dsp, "inputinit", &DSP.inputinit);
+  new bx_shadow_data_c(list, "chunk", DSP.dma.chunk, BX_SOUNDLOW_WAVEPACKETSIZE);
   bx_list_c *csp = new bx_list_c(list, "csp_reg", 256);
   for (i=0; i<256; i++) {
     sprintf(name, "0x%02x", i);
@@ -429,19 +433,23 @@ void bx_sb16_c::dsp_dmatimer(void *this_ptr)
 {
   bx_sb16_c *This = (bx_sb16_c *) this_ptr;
 
-  // raise the DRQ line. It is then lowered by dsp_getsamplebyte()
-  // when the next byte has been received.
+  // raise the DRQ line. It is then lowered by the dma read / write functions
+  // when the next byte has been sent / received.
   // However, don't do this if the next byte/word will fill up the
-  // output buffer and the output functions are not ready yet.
+  // output buffer and the output functions are not ready yet
+  // or if buffer is empty in input mode.
 
   if ((BX_SB16_THIS wavemode != 1) ||
-       ((This->dsp.dma.chunkindex + 1 < BX_SOUND_OUTPUT_WAVEPACKETSIZE) &&
+       ((This->dsp.dma.chunkindex + 1 < BX_SOUNDLOW_WAVEPACKETSIZE) &&
         (This->dsp.dma.count > 0)) ||
-       (BX_SB16_OUTPUT->waveready() == BX_SOUND_OUTPUT_OK)) {
-    if ((DSP.dma.bits == 8) || (BX_SB16_DMAH == 0)) {
-      DEV_dma_set_drq(BX_SB16_DMAL, 1);
-    } else {
-      DEV_dma_set_drq(BX_SB16_DMAH, 1);
+       (BX_SB16_OUTPUT->waveready() == BX_SOUNDLOW_OK)) {
+    if (((This->dsp.dma.output == 0) && (This->dsp.dma.chunkcount > 0)) ||
+        (This->dsp.dma.output == 1)) {
+      if ((DSP.dma.bits == 8) || (BX_SB16_DMAH == 0)) {
+        DEV_dma_set_drq(BX_SB16_DMAL, 1);
+      } else {
+        DEV_dma_set_drq(BX_SB16_DMAH, 1);
+      }
     }
   }
 }
@@ -1129,16 +1137,18 @@ void bx_sb16_c::dsp_dma(Bit8u command, Bit8u mode, Bit16u length, Bit8u comp)
     if (BX_SB16_THIS wavemode == 1) {
       if (DSP.outputinit == 0) {
         ret = BX_SB16_OUTPUT->openwaveoutput(SIM->get_param_string(BXPN_SB16_WAVEFILE)->getptr());
-        if (ret != BX_SOUND_OUTPUT_OK) {
+        if (ret != BX_SOUNDLOW_OK) {
           BX_SB16_THIS wavemode = 0;
           writelog(WAVELOG(2), "Error: Could not open wave output device.");
         } else {
           DSP.outputinit = 1;
-          ret = BX_SB16_OUTPUT->startwaveplayback(DSP.dma.samplerate, DSP.dma.bits, DSP.dma.stereo, DSP.dma.format);
-          if (ret != BX_SOUND_OUTPUT_OK) {
-            BX_SB16_THIS wavemode = 0;
-            writelog(WAVELOG(2), "Error: Could not start wave playback.");
-          }
+        }
+      }
+      if (DSP.outputinit == 1) {
+        ret = BX_SB16_OUTPUT->startwaveplayback(DSP.dma.samplerate, DSP.dma.bits, DSP.dma.stereo, DSP.dma.format);
+        if (ret != BX_SOUNDLOW_OK) {
+          BX_SB16_THIS wavemode = 0;
+          writelog(WAVELOG(2), "Error: Could not start wave playback.");
         }
       }
     } else if ((BX_SB16_THIS wavemode == 2) ||
@@ -1153,11 +1163,63 @@ void bx_sb16_c::dsp_dma(Bit8u command, Bit8u mode, Bit16u length, Bit8u comp)
         initvocfile();
       }
     }
+    DSP.dma.chunkcount = sampledatarate / 10; // 0.1 sec
+    if (DSP.dma.chunkcount > BX_SOUNDLOW_WAVEPACKETSIZE) {
+      DSP.dma.chunkcount = BX_SOUNDLOW_WAVEPACKETSIZE;
+    }
+  } else {
+    if (BX_SB16_THIS wavemode == 1) {
+      if (DSP.inputinit == 0) {
+        ret = BX_SB16_OUTPUT->openwaveinput(SIM->get_param_string(BXPN_SB16_WAVEFILE)->getptr(), sb16_adc_handler);
+        if (ret != BX_SOUNDLOW_OK) {
+          BX_SB16_THIS wavemode = 0;
+          writelog(WAVELOG(2), "Error: Could not open wave input device.");
+        } else {
+          DSP.inputinit = 1;
+        }
+      }
+      if (DSP.inputinit == 1) {
+        ret = BX_SB16_OUTPUT->startwaverecord(DSP.dma.samplerate, DSP.dma.bits, DSP.dma.stereo, DSP.dma.format);
+        if (ret != BX_SOUNDLOW_OK) {
+          BX_SB16_THIS wavemode = 0;
+          writelog(WAVELOG(2), "Error: Could not start wave record.");
+        }
+      }
+    }
+    DSP.dma.chunkcount = 0;
   }
 
   dsp_enabledma();
 }
 
+Bit32u bx_sb16_c::sb16_adc_handler(void *this_ptr, Bit32u buflen)
+{
+  bx_sb16_c *class_ptr = (bx_sb16_c*)this_ptr;
+  class_ptr->dsp_adc_handler(buflen);
+  return 0;
+}
+
+Bit32u bx_sb16_c::dsp_adc_handler(Bit32u buflen)
+{
+  Bit32u len;
+
+  len = DSP.dma.chunkcount - DSP.dma.chunkindex;
+  if (len > 0) {
+    memcpy(DSP.dma.chunk, DSP.dma.chunk+DSP.dma.chunkindex, len);
+    DSP.dma.chunkcount = len;
+  }
+  DSP.dma.chunkindex = 0;
+  if ((DSP.dma.chunkcount + buflen) > BX_SOUNDLOW_WAVEPACKETSIZE) {
+    DSP.dma.chunkcount = BX_SOUNDLOW_WAVEPACKETSIZE;
+    len = DSP.dma.chunkcount + buflen - BX_SOUNDLOW_WAVEPACKETSIZE;
+    BX_DEBUG(("dsp_adc_handler(): unhandled len=%d", len));
+  } else {
+    DSP.dma.chunkcount += buflen;
+    len = 0;
+  }
+  BX_SB16_OUTPUT->getwavepacket(DSP.dma.chunkcount, DSP.dma.chunk);
+  return len;
+}
 
 // dsp_enabledma(): Start the DMA timer and thus the transfer
 
@@ -1234,32 +1296,6 @@ Bit32u bx_sb16_c::dsp_irq16ack()
 
 // highlevel input and output handlers - rerouting to/from file,device
 
-// get a wave packet from the input device (not supported yet)
-void bx_sb16_c::dsp_getwavepacket()
-{
-  writelog(WAVELOG(3), "DMA reads not supported. Returning silence.");
-
-  // fill the buffer with silence. Watch for 16bit transfer and signed/unsigned
-
-  // these are the two different bytes in 16bit transfer (both the same for 8bit)
-  Bit8u byteA, byteB;
-
-  byteA = 0x00;  // compatible with all signed transfers
-  byteB = 0x00;
-
-  if (DSP.dma.issigned == 0)
-    byteB = 0x80;
-
-  if (DSP.dma.bits == 8)
-    byteA = byteB;
-
-  for (int i = 0; i < BX_SOUND_OUTPUT_WAVEPACKETSIZE; i++)
-    DSP.dma.chunk[i] = ((i & 1) == 0) ? byteA : byteB;
-
-  DSP.dma.chunkcount = BX_SOUND_OUTPUT_WAVEPACKETSIZE;
-  DSP.dma.chunkindex = 0;
-}
-
 // write a wave packet to the output device
 void bx_sb16_c::dsp_sendwavepacket()
 {
@@ -1300,20 +1336,24 @@ void bx_sb16_c::dsp_sendwavepacket()
 // put a sample byte into the output buffer
 void bx_sb16_c::dsp_getsamplebyte(Bit8u value)
 {
-  if (DSP.dma.chunkindex < BX_SOUND_OUTPUT_WAVEPACKETSIZE)
+  if (DSP.dma.chunkindex < DSP.dma.chunkcount)
     DSP.dma.chunk[DSP.dma.chunkindex++] = value;
 
-  if (DSP.dma.chunkindex >= BX_SOUND_OUTPUT_WAVEPACKETSIZE)
+  if (DSP.dma.chunkindex >= DSP.dma.chunkcount)
     dsp_sendwavepacket();
 }
 
 // read a sample byte from the input buffer
 Bit8u bx_sb16_c::dsp_putsamplebyte()
 {
-  if (DSP.dma.chunkindex >= DSP.dma.chunkcount)
-    dsp_getwavepacket();
+  Bit8u value = DSP.dma.chunk[DSP.dma.chunkindex++];
 
-  return DSP.dma.chunk[DSP.dma.chunkindex++];
+  if (DSP.dma.chunkindex >= DSP.dma.chunkcount) {
+    DSP.dma.chunkcount = 0;
+    DSP.dma.chunkindex = 0;
+  }
+
+  return value;
 }
 
 // called when the last byte of a DMA transfer has been received/sent
@@ -1328,6 +1368,10 @@ void bx_sb16_c::dsp_dmadone()
       BX_SB16_OUTPUT->stopwaveplayback();
     } else if (BX_SB16_THIS wavemode != 0) {
       fflush(WAVEDATA);
+    }
+  } else if ((DSP.dma.output == 0) && (DSP.dma.mode != 2)) {
+    if (BX_SB16_THIS wavemode == 1) {
+      BX_SB16_OUTPUT->stopwaverecord();
     }
   }
 
@@ -1707,7 +1751,7 @@ Bit32u bx_sb16_c::mpu_status()
 
   if ((MPU.datain.full() == 1) ||
        ((BX_SB16_THIS midimode == 1) &&
-        (BX_SB16_OUTPUT->midiready() == BX_SOUND_OUTPUT_ERR)))
+        (BX_SB16_OUTPUT->midiready() == BX_SOUNDLOW_ERR)))
     result |= 0x40;       // output not ready
   if (MPU.dataout.empty() == 1)
     result |= 0x80;       // no input available
@@ -2880,7 +2924,7 @@ void bx_sb16_c::writemidicommand(int command, int length, Bit8u data[])
   if (BX_SB16_THIS midimode == 1) {
     if (MPU.outputinit != 1) {
       writelog(MIDILOG(4), "Initializing Midi output.");
-      if (BX_SB16_OUTPUT->openmidioutput(SIM->get_param_string(BXPN_SB16_MIDIFILE)->getptr()) == BX_SOUND_OUTPUT_OK)
+      if (BX_SB16_OUTPUT->openmidioutput(SIM->get_param_string(BXPN_SB16_MIDIFILE)->getptr()) == BX_SOUNDLOW_OK)
         MPU.outputinit = 1;
       else
         MPU.outputinit = 0;

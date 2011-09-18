@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//   Copyright (c) 2009-2010 Stanislav Shwartsman
+//   Copyright (c) 2009-2011 Stanislav Shwartsman
 //          Written by Stanislav Shwartsman [sshwarts at sourceforge net]
 //
 //  This library is free software; you can redistribute it and/or
@@ -82,7 +82,7 @@ enum VMX_vmexit_reason {
    VMX_VMEXIT_NMI_WINDOW = 8,
    VMX_VMEXIT_TASK_SWITCH = 9,
    VMX_VMEXIT_CPUID = 10,
-   VMX_VMEXIT_RESERVED11 = 11,
+   VMX_VMEXIT_GETSEC = 11,
    VMX_VMEXIT_HLT = 12,
    VMX_VMEXIT_INVD = 13,
    VMX_VMEXIT_INVLPG = 14,
@@ -123,10 +123,12 @@ enum VMX_vmexit_reason {
    VMX_VMEXIT_EPT_MISCONFIGURATION = 49,
    VMX_VMEXIT_INVEPT = 50,
    VMX_VMEXIT_RDTSCP = 51,
-   VMX_VMEXIT_VMX_PREEMTION_TIMER_FIRED = 52,
+   VMX_VMEXIT_VMX_PREEMPTION_TIMER_EXPIRED = 52,
    VMX_VMEXIT_INVVPID = 53,
    VMX_VMEXIT_WBINVD = 54,
-   VMX_VMEXIT_XSETBV = 55
+   VMX_VMEXIT_XSETBV = 55,
+   VMX_VMEXIT_RESERVED56 = 56,
+   VMX_VMEXIT_RDRAND = 57
 };
 
 // VMexit on CR register access
@@ -267,6 +269,8 @@ enum VMX_vmabort_code {
 #define VMCS_32BIT_CONTROL_VMENTRY_INSTRUCTION_LENGTH      0x0000401A
 #define VMCS_32BIT_CONTROL_TPR_THRESHOLD                   0x0000401C
 #define VMCS_32BIT_CONTROL_SECONDARY_VMEXEC_CONTROLS       0x0000401E
+#define VMCS_32BIT_CONTROL_PAUSE_LOOP_EXITING_GAP          0x00004020
+#define VMCS_32BIT_CONTROL_PAUSE_LOOP_EXITING_WINDOW       0x00004022
 
 /* VMCS 32-bit read only data fields */
 /* binary 0100_01xx_xxxx_xxx0 */
@@ -303,6 +307,7 @@ enum VMX_vmabort_code {
 #define VMCS_32BIT_GUEST_ACTIVITY_STATE                    0x00004826
 #define VMCS_32BIT_GUEST_SMBASE                            0x00004828
 #define VMCS_32BIT_GUEST_IA32_SYSENTER_CS_MSR              0x0000482A
+#define VMCS_32BIT_GUEST_PREEMPTION_TIMER_VALUE            0x0000482E
 
 /* VMCS 32-bit host-state fields */
 /* binary 0100_11xx_xxxx_xxx0 */
@@ -366,7 +371,7 @@ enum VMX_vmabort_code {
 #define VMCS_HOST_RSP                                      0x00006C14
 #define VMCS_HOST_RIP                                      0x00006C16
 
-#define VMX_HIGHEST_VMCS_ENCODING   (0x2C)
+#define VMX_HIGHEST_VMCS_ENCODING   (0x30)
 
 // ===============================
 //  VMCS fields encoding/decoding
@@ -502,10 +507,10 @@ typedef struct bx_VMCS
   // VM-Execution Control Fields
   //
 
-#define VMX_VM_EXEC_CTRL1_EXTERNAL_INTERRUPT_VMEXIT (1 << 0)
-#define VMX_VM_EXEC_CTRL1_NMI_VMEXIT                (1 << 3)
-#define VMX_VM_EXEC_CTRL1_VIRTUAL_NMI               (1 << 5)
-#define VMX_VM_EXEC_CTRL1_VMX_PREEMPTION_TIMER      (1 << 6)
+#define VMX_VM_EXEC_CTRL1_EXTERNAL_INTERRUPT_VMEXIT   (1 << 0)
+#define VMX_VM_EXEC_CTRL1_NMI_VMEXIT                  (1 << 3)
+#define VMX_VM_EXEC_CTRL1_VIRTUAL_NMI                 (1 << 5)
+#define VMX_VM_EXEC_CTRL1_VMX_PREEMPTION_TIMER_VMEXIT (1 << 6)
 
 #ifdef BX_VMX_ENABLE_ALL
 
@@ -515,7 +520,8 @@ typedef struct bx_VMCS
 
 #define VMX_VM_EXEC_CTRL1_SUPPORTED_BITS \
   (VMX_VM_EXEC_CTRL1_EXTERNAL_INTERRUPT_VMEXIT | \
-   VMX_VM_EXEC_CTRL1_NMI_VMEXIT)
+   VMX_VM_EXEC_CTRL1_NMI_VMEXIT | \
+   ((BX_SUPPORT_VMX >= 2) ? VMX_VM_EXEC_CTRL1_VMX_PREEMPTION_TIMER_VMEXIT : 0))
 
 #endif
 
@@ -584,6 +590,7 @@ typedef struct bx_VMCS
 #define VMX_VM_EXEC_CTRL3_WBINVD_VMEXIT             (1 << 6)
 #define VMX_VM_EXEC_CTRL3_UNRESTRICTED_GUEST        (1 << 7)
 #define VMX_VM_EXEC_CTRL3_PAUSE_LOOP_VMEXIT         (1 << 10)
+#define VMX_VM_EXEC_CTRL3_RDRAND_VMEXIT             (1 << 11)
 
 #ifdef BX_VMX_ENABLE_ALL
 
@@ -599,7 +606,8 @@ typedef struct bx_VMCS
     VMX_VM_EXEC_CTRL3_VIRTUALIZE_X2APIC_MODE | \
     VMX_VM_EXEC_CTRL3_VPID_ENABLE | \
     VMX_VM_EXEC_CTRL3_WBINVD_VMEXIT | \
-    VMX_VM_EXEC_CTRL3_UNRESTRICTED_GUEST)
+    VMX_VM_EXEC_CTRL3_UNRESTRICTED_GUEST | \
+    VMX_VM_EXEC_CTRL3_PAUSE_LOOP_VMEXIT)
 
 #endif
 
@@ -632,6 +640,13 @@ typedef struct bx_VMCS
 
    Bit64u executive_vmcsptr;
 
+#if BX_SUPPORT_VMX >= 2
+   Bit32u pause_loop_exiting_gap;
+   Bit32u pause_loop_exiting_window;
+   Bit64u last_pause_time; // used for pause loop exiting
+   Bit32u first_pause_time;
+#endif
+
    //
    // VM-Exit Control Fields
    //
@@ -659,7 +674,8 @@ typedef struct bx_VMCS
    ((BX_SUPPORT_VMX >= 2) ? VMX_VMEXIT_CTRL1_STORE_PAT_MSR : 0) | \
    ((BX_SUPPORT_VMX >= 2) ? VMX_VMEXIT_CTRL1_LOAD_PAT_MSR : 0) | \
    ((BX_SUPPORT_VMX >= 2) ? VMX_VMEXIT_CTRL1_STORE_EFER_MSR : 0) | \
-   ((BX_SUPPORT_VMX >= 2) ? VMX_VMEXIT_CTRL1_LOAD_EFER_MSR : 0))
+   ((BX_SUPPORT_VMX >= 2) ? VMX_VMEXIT_CTRL1_LOAD_EFER_MSR : 0) | \
+   ((BX_SUPPORT_VMX >= 2) ? VMX_VMEXIT_CTRL1_STORE_VMX_PREEMPTION_TIMER : 0))
 
 #endif
 
@@ -669,7 +685,7 @@ typedef struct bx_VMCS
    bx_phy_address vmexit_msr_store_addr;
    Bit32u vmexit_msr_load_cnt;
    bx_phy_address vmexit_msr_load_addr;
-   
+
    //
    // VM-Entry Control Fields
    //
@@ -777,7 +793,9 @@ enum VMX_Activity_State {
 //       instruction-information field on VM exits due to
 //       execution of INS/OUTS
 // 55:55 set if any VMX controls that default to `1 may be
-//       cleared to `0
+//       cleared to `0, also indicates that IA32_VMX_TRUE_PINBASED_CTLS,
+//       IA32_VMX_TRUE_PROCBASED_CTLS, IA32_VMX_TRUE_EXIT_CTLS and
+//       IA32_VMX_TRUE_ENTRY_CTLS MSRs are supported.
 // 56:63 reserved, must be zero
 //
 
@@ -927,8 +945,12 @@ enum VMX_Activity_State {
   #define VMX_MISC_STORE_LMA_TO_X86_64_GUEST_VMENTRY_CONTROL (0)
 #endif
 
+//Rate to increase VMX preemtion timer
+#define VMX_MISC_PREEMPTION_TIMER_RATE (0)
+
 #define VMX_MSR_MISC ((VMX_CR3_TARGET_MAX_CNT << 16) | \
-            VMX_MISC_STORE_LMA_TO_X86_64_GUEST_VMENTRY_CONTROL)
+            VMX_MISC_STORE_LMA_TO_X86_64_GUEST_VMENTRY_CONTROL | \
+            VMX_MISC_PREEMPTION_TIMER_RATE)
 
 //
 // IA32_VMX_CR0_FIXED0 MSR (0x486)   IA32_VMX_CR0_FIXED1 MSR (0x487)
@@ -962,8 +984,8 @@ enum VMX_Activity_State {
    ((((Bit64u) VMX_MSR_CR4_FIXED0_HI) << 32) | VMX_MSR_CR4_FIXED0_LO)
 
 // allowed 1-setting in CR0 in VMX mode
-#define VMX_MSR_CR4_FIXED1_LO GET32L(get_cr4_allow_mask())
-#define VMX_MSR_CR4_FIXED1_HI GET32H(get_cr4_allow_mask())
+#define VMX_MSR_CR4_FIXED1_LO (BX_CPU_THIS_PTR cr4_suppmask)
+#define VMX_MSR_CR4_FIXED1_HI (0)
 
 #define VMX_MSR_CR4_FIXED1 \
    ((((Bit64u) VMX_MSR_CR4_FIXED1_HI) << 32) | VMX_MSR_CR4_FIXED1_LO)

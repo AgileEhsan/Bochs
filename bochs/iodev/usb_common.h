@@ -154,7 +154,7 @@ public:
   virtual void after_restore_state() {}
   virtual void cancel_packet(USBPacket *p) {}
   virtual bx_bool set_option(const char *option) {return 0;}
-  virtual void timer() {}
+  virtual void runtime_config() {}
 
   bx_bool get_connected() {return d.connected;}
   usbdev_type get_type() {return d.type;}
@@ -162,6 +162,7 @@ public:
   int get_speed() {return d.speed;}
   void set_speed(int speed) {d.speed = speed;}
   Bit8u get_address() {return d.addr;}
+  int get_max_packet_size() {return d.max_packet_size;}
 
   void usb_send_msg(int msg);
 
@@ -182,6 +183,7 @@ protected:
     int setup_state;
     int setup_len;
     int setup_index;
+    int max_packet_size;
     bx_bool stall;
   } d;
 

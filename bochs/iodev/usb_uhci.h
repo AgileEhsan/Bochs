@@ -32,7 +32,6 @@
 // defined in bochs.h: UHCI supports 2 ports per root hub
 
 typedef struct {
-  Bit32u base_ioaddr;
   int    timer_index;
 
   // Registers
@@ -155,7 +154,6 @@ typedef struct {
     bx_bool status;
   } usb_port[BX_N_USB_UHCI_PORTS];
 
-  Bit8u pci_conf[256];
   Bit8u devfunc;
 
   int statusbar_id; // ID of the status LEDs
@@ -228,6 +226,8 @@ private:
   static void iolight_timer_handler(void *);
   void iolight_timer(void);
 
+  static void runtime_config_handler(void *);
+  void runtime_config(void);
 };
 
 #endif

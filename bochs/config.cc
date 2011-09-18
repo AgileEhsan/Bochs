@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2002-2009  The Bochs Project
+//  Copyright (C) 2002-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,7 @@
 //  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
 #include "bochs.h"
+#include "bxversion.h"
 #include "iodev/iodev.h"
 #include "param_names.h"
 #include <assert.h>
@@ -64,13 +65,7 @@ static Bit64s bx_param_handler(bx_param_c *param, int set, Bit64s val)
     } else {
       device = 1;
     }
-    if (!strcmp(param->get_name(), "status")) {
-      if ((set) && (SIM->get_init_done())) {
-        Bit32u handle = DEV_hd_get_device_handle(channel, device);
-        DEV_hd_set_cd_media_status(handle, (unsigned)val);
-        bx_gui->update_drive_status_buttons();
-      }
-    } else if (!strcmp(param->get_name(), "type")) {
+    if (!strcmp(param->get_name(), "type")) {
       if (set) {
         switch (val) {
           case BX_ATA_DEVICE_DISK:
@@ -120,67 +115,23 @@ const char *bx_param_string_handler(bx_param_string_c *param, int set,
                                     const char *oldval, const char *val, int maxlen)
 {
   char pname[BX_PATHNAME_LEN];
-  Bit8u channel, device;
 
-  int empty = 0;
-  if ((strlen(val) < 1) || !strcmp ("none", val)) {
-    empty = 1;
-    val = "none";
-  }
-  bx_list_c *base = (bx_list_c*) param->get_parent();
-  base->get_param_path(pname, BX_PATHNAME_LEN);
-  if (!strncmp(pname, "ata.", 4)) {
-    channel = pname[4] - '0';
-    if (!strcmp(base->get_name(), "master")) {
-      device = 0;
-    } else {
-      device = 1;
+  param->get_param_path(pname, BX_PATHNAME_LEN);
+  if (!strcmp(pname, BXPN_SCREENMODE)) {
+    if (set==1) {
+      BX_INFO(("Screen mode changed to %s", val));
     }
-    if (!strcmp(param->get_name(), "path")) {
-      if (set==1) {
-        if (SIM->get_init_done()) {
-          Bit32u handle = DEV_hd_get_device_handle(channel, device);
-          if (empty) {
-            DEV_hd_set_cd_media_status(handle, 0);
-            bx_gui->update_drive_status_buttons();
-          } else {
-            if (!SIM->get_param_num("present", base)->get()) {
-              BX_ERROR(("Cannot add a cdrom drive at runtime"));
-              SIM->get_param_num("present", base)->set(0);
-            }
-            if (SIM->get_param_num("type", base)->get() != BX_ATA_DEVICE_CDROM) {
-              BX_ERROR(("Device is not a cdrom drive"));
-              SIM->get_param_num("present", base)->set(0);
-            }
-          }
-          if (DEV_hd_present() &&
-              (SIM->get_param_num("status", base)->get() == 1) &&
-              (SIM->get_param_num("type", base)->get() == BX_ATA_DEVICE_CDROM)) {
-            // tell the device model that we removed, then inserted the cd
-            DEV_hd_set_cd_media_status(handle, 0);
-            DEV_hd_set_cd_media_status(handle, 1);
-          }
-        }
-      }
-    }
-  } else {
-    param->get_param_path(pname, BX_PATHNAME_LEN);
-    if (!strcmp(pname, BXPN_SCREENMODE)) {
-      if (set==1) {
-        BX_INFO(("Screen mode changed to %s", val));
-      }
 #if BX_PLUGINS
-    } else if (!strncmp(pname, "misc.user_plugin", 16)) {
-      if ((strlen(oldval) > 0) && (strcmp(oldval, "none"))) {
-        PLUG_unload_user_plugin(oldval);
-      }
-      if ((strlen(val) > 0) && (strcmp(val, "none"))) {
-        PLUG_load_user_plugin(val);
-      }
-#endif
-    } else {
-      BX_PANIC(("bx_param_string_handler called with unknown parameter '%s'", pname));
+  } else if (!strncmp(pname, "misc.user_plugin", 16)) {
+    if ((strlen(oldval) > 0) && (strcmp(oldval, "none"))) {
+      PLUG_unload_user_plugin(oldval);
     }
+    if ((strlen(val) > 0) && (strcmp(val, "none"))) {
+      PLUG_load_user_plugin(val);
+    }
+#endif
+  } else {
+    BX_PANIC(("bx_param_string_handler called with unknown parameter '%s'", pname));
   }
   return val;
 }
@@ -193,7 +144,7 @@ void bx_init_options()
   bx_param_num_c *ioaddr, *ioaddr2, *irq;
   bx_param_bool_c *enabled, *readonly, *status;
   bx_param_enum_c *mode, *type, *ethmod, *toggle;
-  bx_param_string_c *macaddr, *ethdev;
+  bx_param_string_c *macaddr;
   bx_param_filename_c *path;
   char name[BX_PATHNAME_LEN], descr[512], group[16], label[512];
 
@@ -267,23 +218,35 @@ void bx_init_options()
 #endif
 
   // cpu subtree
-  bx_list_c *cpu_param = new bx_list_c(root_param, "cpu", "CPU Options", 8 + BX_SUPPORT_SMP);
+  bx_list_c *cpu_param = new bx_list_c(root_param, "cpu", "CPU Options", 10 + BX_SUPPORT_SMP);
+
+  static const char *cpu_names[] = {
+#define bx_define_cpudb(model) #model,
+#include "cpudb.h"
+    NULL
+  };
+#undef bx_define_cpudb
+
+  new bx_param_enum_c(cpu_param,
+      "model", "CPU configuration",
+      "Choose pre-defined CPU configuration",
+      cpu_names, 0, 0);
 
   // cpu options
   bx_param_num_c *nprocessors = new bx_param_num_c(cpu_param,
-      "n_processors", "Number of CPUs in SMP mode",
-      "Sets the number of CPUs for multiprocessor emulation",
+      "n_processors", "Number of processors in SMP mode",
+      "Sets the number of processors for multiprocessor emulation",
       1, BX_CPU_PROCESSORS_LIMIT,
       1);
   nprocessors->set_enabled(BX_CPU_PROCESSORS_LIMIT > 1);
   bx_param_num_c *ncores = new bx_param_num_c(cpu_param,
-      "n_cores", "Number of processor cores in each CPU in SMP mode",
-      "Sets the number of processor cores per CPU for multiprocessor emulation",
+      "n_cores", "Number of cores in each processor in SMP mode",
+      "Sets the number of cores per processor for multiprocessor emulation",
       1, BX_CPU_CORES_LIMIT,
       1);
   ncores->set_enabled(BX_CPU_CORES_LIMIT > 1);
   bx_param_num_c *nthreads = new bx_param_num_c(cpu_param,
-      "n_threads", "Number of HT threads per each process core in SMP mode",
+      "n_threads", "Number of HT threads per each core in SMP mode",
       "Sets the number of HT (Intel(R) HyperThreading Technology) threads per core for multiprocessor emulation",
       1, BX_CPU_HT_THREADS_LIMIT,
       1);
@@ -306,10 +269,14 @@ void bx_init_options()
       1);
 #if BX_CPU_LEVEL >= 5
   new bx_param_bool_c(cpu_param,
-      "ignore_bad_msrs", "Ignore RDMSR/WRMSR to unknown MSR register",
+      "ignore_bad_msrs", "Ignore RDMSR / WRMSR to unknown MSR register",
       "Ignore RDMSR/WRMSR to unknown MSR register",
       1);
 #endif
+  new bx_param_bool_c(cpu_param,
+      "cpuid_limit_winnt", "Limit max CPUID function to 3",
+      "Limit max CPUID function reported to 3 to workaround WinNT issue",
+      0);
 #if BX_CONFIGURE_MSRS
   new bx_param_filename_c(cpu_param,
       "msrs",
@@ -322,12 +289,7 @@ void bx_init_options()
 
   // cpuid subtree
 #if BX_CPU_LEVEL >= 4
-  bx_list_c *cpuid_param = new bx_list_c(root_param, "cpuid", "CPUID Options", 18);
-
-  new bx_param_bool_c(cpuid_param,
-      "cpuid_limit_winnt", "Limit max CPUID function to 3",
-      "Limit max CPUID function reported to 3 to workaround WinNT issue",
-      0);
+  bx_list_c *cpuid_param = new bx_list_c(root_param, "cpuid", "CPUID Options", 23);
 
   new bx_param_string_c(cpuid_param,
       "vendor_string",
@@ -373,22 +335,32 @@ void bx_init_options()
       "mmx", "Support for MMX instruction set",
       "Support for MMX instruction set",
       1);
+
+  // configure defaults to XAPIC enabled
+  static const char *apic_names[] = { "legacy", "xapic", "x2apic", NULL };
+  new bx_param_enum_c(cpuid_param,
+      "apic", "APIC configuration",
+      "Select APIC configuration (Legacy APIC/XAPIC/X2APIC)",
+      apic_names,
+      BX_CPUID_SUPPORT_XAPIC,
+      BX_CPUID_SUPPORT_LEGACY_APIC);
 #endif
 
 #if BX_CPU_LEVEL >= 6
   // configure defaults to CPU_LEVEL = 6 with SSE2 enabled
   static const char *sse_names[] = { "none", "sse", "sse2", "sse3", "ssse3", "sse4_1", "sse4_2", NULL };
-
   new bx_param_enum_c(cpuid_param,
       "sse", "Support for SSE instruction set",
       "Support for SSE/SSE2/SSE3/SSSE3/SSE4_1/SSE4_2 instruction set",
       sse_names,
       BX_CPUID_SUPPORT_SSE2,
       BX_CPUID_SUPPORT_NOSSE);
+
   new bx_param_bool_c(cpuid_param,
-      "xapic", "Support for XAPIC extensions",
-      "Support for XAPIC extensions",
-      1);
+      "sse4a", "Support for AMD SSE4A instructions",
+      "Support for AMD SSE4A instructionã",
+      0);
+
   new bx_param_bool_c(cpuid_param,
       "sep", "Support for SYSENTER/SYSEXIT instructions",
       "Support for SYSENTER/SYSEXIT instructions",
@@ -405,6 +377,26 @@ void bx_init_options()
       "xsave", "Support for XSAVE extensions",
       "Support for XSAVE extensions",
       0);
+  new bx_param_bool_c(cpuid_param,
+      "xsaveopt", "Support for XSAVEOPT instruction",
+      "Support for XSAVEOPT instruction",
+      0);
+#if BX_SUPPORT_AVX
+  new bx_param_num_c(cpuid_param,
+      "avx", "Support for AVX instruction set",
+      "Support for AVX instruction set",
+      0, 2,
+      0);
+  new bx_param_bool_c(cpuid_param,
+      "avx_f16c", "Support for AVX F16 convert instructions",
+      "Support for AVX F16 convert instructions",
+      0);
+  new bx_param_num_c(cpuid_param,
+      "bmi", "Support for BMI instructions",
+      "Support for Bit Manipulation Instructions (BMI)",
+      0, 2,
+      0);
+#endif
 #if BX_SUPPORT_X86_64
   new bx_param_bool_c(cpuid_param,
       "1g_pages", "1G pages support in long mode",
@@ -419,13 +411,17 @@ void bx_init_options()
       "FS/GS BASE access instructions support in long mode",
       0);
 #endif
+  new bx_param_bool_c(cpuid_param,
+      "smep", "Supervisor Mode Execution Protection support",
+      "Supervisor Mode Execution Protection support",
+      0);
 #if BX_SUPPORT_MONITOR_MWAIT
   new bx_param_bool_c(cpuid_param,
       "mwait", "MONITOR/MWAIT instructions support",
-      "Don't put CPU to sleep state by MWAIT",
+      "MONITOR/MWAIT instructions support",
       BX_SUPPORT_MONITOR_MWAIT);
   new bx_param_bool_c(cpuid_param,
-      "mwait_is_nop", "MWAIT enter CPU to sleep state",
+      "mwait_is_nop", "Don't put CPU to sleep state by MWAIT",
       "Don't put CPU to sleep state by MWAIT",
       0);
 #endif
@@ -678,9 +674,6 @@ void bx_init_options()
 #if BX_WITH_CARBON
     "carbon",
 #endif
-#if BX_WITH_BEOS
-    "beos",
-#endif
 #if BX_WITH_MACOS
     "macos",
 #endif
@@ -742,13 +735,13 @@ void bx_init_options()
   screenmode->set_enabled(0);
 #endif
 
-  bx_param_num_c *vga_update_interval = new bx_param_num_c(display,
-      "vga_update_interval",
-      "VGA Update Interval",
-      "Number of microseconds between VGA updates",
-      40000, BX_MAX_BIT32U,
-      50000);
-  vga_update_interval->set_ask_format ("Type a new value for VGA update interval: [%d] ");
+  bx_param_num_c *vga_update_freq = new bx_param_num_c(display,
+      "vga_update_frequency",
+      "VGA Update Frequency",
+      "Number of VGA updates per emulated second",
+      1, 60,
+      5);
+  vga_update_freq->set_ask_format ("Type a new value for VGA update frequency: [%d] ");
 
   bx_param_string_c *vga_extension = new bx_param_string_c(display,
                 "vga_extension",
@@ -1215,8 +1208,6 @@ void bx_init_options()
       type->set_dependent_bitmap(BX_ATA_DEVICE_CDROM, 0x02);
 
       type->set_handler(bx_param_handler);
-      status->set_handler(bx_param_handler);
-      path->set_handler(bx_param_string_handler);
     }
 
     // Enable two ATA interfaces by default, disable the others.
@@ -1405,6 +1396,35 @@ void bx_init_options()
   }
   enabled->set_dependent_list(deplist);
 
+  // xHCI options
+  strcpy(group, "USB xHCI");
+  menu = new bx_list_c(usb, "xhci", "xHCI Configuration");
+  menu->set_options(menu->SHOW_PARENT);
+  menu->set_enabled(BX_SUPPORT_USB_XHCI);
+  enabled = new bx_param_bool_c(menu,
+    "enabled",
+    "Enable xHCI emulation",
+    "Enables the xHCI emulation",
+    0);
+  enabled->set_enabled(BX_SUPPORT_USB_XHCI);
+  deplist = new bx_list_c(NULL, BX_N_USB_XHCI_PORTS * 3);
+  for (i=0; i<BX_N_USB_XHCI_PORTS; i++) {
+    sprintf(name, "port%d", i+1);
+    sprintf(label, "Port #%d Configuration", i+1);
+    sprintf(descr, "Device connected to xHCI port #%d and it's options", i+1);
+    port = new bx_list_c(menu, name, label);
+    port->set_options(port->SERIES_ASK | port->USE_BOX_TITLE);
+    sprintf(descr, "Device connected to xHCI port #%d", i+1);
+    device = new bx_param_string_c(port, "device", "Device", descr, "", BX_PATHNAME_LEN);
+    sprintf(descr, "Options for device connected to xHCI port #%d", i+1);
+    options = new bx_param_string_c(port, "options", "Options", descr, "", BX_PATHNAME_LEN);
+    port->set_group(group);
+    deplist->add(port);
+    deplist->add(device);
+    deplist->add(options);
+  }
+  enabled->set_dependent_list(deplist);
+
   // network subtree
   bx_list_c *network = new bx_list_c(root_param, "network", "Network Configuration");
   network->set_options(network->USE_TAB_WINDOW | network->SHOW_PARENT);
@@ -1426,9 +1446,6 @@ void bx_init_options()
 #endif
 #if BX_NETMOD_FBSD
     "fbsd",
-#endif
-#if BX_NETMOD_ARPBACK
-    "arpback",
 #endif
 #if BX_NETMOD_VDE
     "vde",
@@ -1480,7 +1497,7 @@ void bx_init_options()
     0);
   ethmod->set_by_name("null");
   ethmod->set_ask_format("Choose ethernet module for the NE2K [%s] ");
-  ethdev = new bx_param_string_c(menu,
+  new bx_param_string_c(menu,
     "ethdev",
     "Ethernet device",
     "Device used for the connection to the real net. This is only valid if an ethernet module other than 'null' is used.",
@@ -1519,7 +1536,7 @@ void bx_init_options()
     0);
   ethmod->set_by_name("null");
   ethmod->set_ask_format("Choose ethernet module for the Pseudo NIC [%s]");
-  ethdev = new bx_param_string_c(menu,
+  new bx_param_string_c(menu,
     "ethdev",
     "Ethernet device",
     "Device used for the connection to the real net. This is only valid if an ethernet module other than 'null' is used.",
@@ -1632,20 +1649,12 @@ void bx_init_options()
   // misc options subtree
   bx_list_c *misc = new bx_list_c(root_param, "misc", "Configure Everything Else");
   misc->set_options(misc->SHOW_PARENT);
-  bx_param_num_c *gdbstub_opt;
 
   // port e9 hack
   new bx_param_bool_c(misc,
       "port_e9_hack",
       "Enable port 0xE9 hack",
       "Debug messages written to i/o port 0xE9 will be displayed on console",
-      0);
-
-  // text snapshot check panic
-  new bx_param_bool_c(misc,
-      "text_snapshot_check",
-      "Enable text snapshot check panic",
-      "Enable panic when text on screen matches snapchk.txt.\nUseful for regression testing.\nIn win32, turns off CR/LF in snapshots and cuts.",
       0);
 
   // GDB stub
@@ -1658,25 +1667,25 @@ void bx_init_options()
     "",
     0);
   enabled->set_enabled(BX_GDBSTUB);
-  gdbstub_opt = new bx_param_num_c(menu,
+  new bx_param_num_c(menu,
     "port",
     "Port",
     "TCP/IP port for GDB stub",
     0, 65535,
     1234);
-  gdbstub_opt = new bx_param_num_c(menu,
+  new bx_param_num_c(menu,
     "text_base",
     "Text base",
     "",
     0, BX_MAX_BIT32U,
     0);
-  gdbstub_opt = new bx_param_num_c(menu,
+  new bx_param_num_c(menu,
     "data_base",
     "Data base",
     "",
     0, BX_MAX_BIT32U,
     0);
-  gdbstub_opt = new bx_param_num_c(menu,
+  new bx_param_num_c(menu,
     "bss_base",
     "BSS base",
     "",
@@ -1699,8 +1708,6 @@ void bx_init_options()
 #endif
 #if BX_SUPPORT_PCI
   new bx_param_bool_c(menu, "pci_ide", "Enable 'pci_ide'", "", 1);
-#endif
-#if BX_SUPPORT_ACPI
   new bx_param_bool_c(menu, "acpi", "Enable 'acpi'", "", 1);
 #endif
 #if BX_SUPPORT_APIC
@@ -1761,7 +1768,7 @@ void bx_init_options()
   usb->set_options(usb->SHOW_PARENT | usb->USE_TAB_WINDOW);
   // misc runtime options
   bx_param_c *rt_misc_init_list[] = {
-      SIM->get_param_num(BXPN_VGA_UPDATE_INTERVAL),
+      SIM->get_param_num(BXPN_VGA_UPDATE_FREQUENCY),
       SIM->get_param_bool(BXPN_MOUSE_ENABLED),
       SIM->get_param_num(BXPN_KBD_PASTE_DELAY),
       SIM->get_param_string(BXPN_USER_SHORTCUT),
@@ -2136,8 +2143,6 @@ static Bit32s parse_log_options(const char *context, char *loglev, char *param1)
 
   if (!strcmp(loglev, "panic")) {
     level = LOGLEV_PANIC;
-  } else if (!strcmp(loglev, "pass")) {
-    level = LOGLEV_PASS;
   } else if (!strcmp(loglev, "error")) {
     level = LOGLEV_ERROR;
   } else if (!strcmp(loglev, "info")) {
@@ -2203,6 +2208,31 @@ static int parse_param_bool(const char *input, int len, const char *param)
   }
 
   return -1;
+}
+
+static int parse_usb_port_params(const char *context, bx_bool devopt, const char *param, int maxports, bx_list_c *base)
+{
+  int idx, plen;
+  char tmpname[20];
+
+  if (!devopt) {
+    plen = 4;
+  } else {
+    plen = 7;
+  }
+  idx = param[plen];
+  if ((idx < '1') || (idx > '9') || (param[plen + 1] != '=')) {
+    PARSE_ERR(("%s: usb_%s: portX / optionsX parameter malformed.", context, base->get_name()));
+    return -1;
+  }
+  idx -= '0';
+  if (idx > maxports) {
+    PARSE_ERR(("%s: usb_%s: port number out of range.", context, base->get_name()));
+    return -1;
+  }
+  sprintf(tmpname, "port%d.%s", idx, devopt ? "options" : "device");
+  SIM->get_param_string(tmpname, base)->set(&param[plen + 2]);
+  return 0;
 }
 
 static int parse_line_formatted(const char *context, int num_params, char *params[])
@@ -2401,10 +2431,6 @@ static int parse_line_formatted(const char *context, int num_params, char *param
         if (type < 0) {
           PARSE_ERR(("%s: ataX-master/slave: unknown type '%s'", context, &params[i][5]));
         }
-      } else if (!strcmp(params[i], "mode=z-undoable")) {
-        PARSE_ERR(("%s: ataX-master/slave mode 'z-undoable' not implemented yet", context));
-      } else if (!strcmp(params[i], "mode=z-volatile")) {
-        PARSE_ERR(("%s: ataX-master/slave mode 'z-volatile' not implemented yet", context));
       } else if (!strncmp(params[i], "mode=", 5)) {
         mode = SIM->get_param_enum("mode", base)->find_by_name(&params[i][5]);
         if (mode < 0) {
@@ -2542,13 +2568,6 @@ static int parse_line_formatted(const char *context, int num_params, char *param
     if (parse_log_options(context, params[0], params[1]) < 0) {
       return -1;
     }
-  } else if (!strcmp(params[0], "pass")) {
-    if (num_params != 2) {
-      PARSE_ERR(("%s: pass directive malformed.", context));
-    }
-    if (parse_log_options(context, params[0], params[1]) < 0) {
-      return -1;
-    }
   } else if (!strcmp(params[0], "error")) {
     if (num_params != 2) {
       PARSE_ERR(("%s: error directive malformed.", context));
@@ -2585,6 +2604,9 @@ static int parse_line_formatted(const char *context, int num_params, char *param
         SIM->get_param_num(BXPN_CPU_NPROCESSORS)->set(processors);
         SIM->get_param_num(BXPN_CPU_NCORES)->set(cores);
         SIM->get_param_num(BXPN_CPU_NTHREADS)->set(threads);
+      } else if (!strncmp(params[i], "model=", 6)) {
+        if (! SIM->get_param_enum(BXPN_CPU_MODEL)->set_by_name(&params[i][6]))
+          PARSE_ERR(("%s: unsupported CPU model option.", context));
       } else if (!strncmp(params[i], "ips=", 4)) {
         SIM->get_param_num(BXPN_IPS)->set(atol(&params[i][4]));
 #if BX_SUPPORT_SMP
@@ -2603,6 +2625,10 @@ static int parse_line_formatted(const char *context, int num_params, char *param
 #endif
       } else if (!strncmp(params[i], "msrs=", 5)) {
         SIM->get_param_string(BXPN_CONFIGURABLE_MSRS_PATH)->set(&params[i][5]);
+      } else if (!strncmp(params[i], "cpuid_limit_winnt=", 18)) {
+        if (parse_param_bool(params[i], 18, BXPN_CPUID_LIMIT_WINNT) < 0) {
+          PARSE_ERR(("%s: cpu directive malformed.", context));
+        }
       } else {
         PARSE_ERR(("%s: cpu directive malformed.", context));
       }
@@ -2629,20 +2655,25 @@ static int parse_line_formatted(const char *context, int num_params, char *param
         SIM->get_param_num(BXPN_CPUID_MODEL)->set(strtoul(&params[i][6], NULL, 0));
       } else if (!strncmp(params[i], "family=", 7)) {
         SIM->get_param_num(BXPN_CPUID_FAMILY)->set(strtoul(&params[i][7], NULL, 0));
-      } else if (!strncmp(params[i], "cpuid_limit_winnt=", 18)) {
-        if (parse_param_bool(params[i], 18, BXPN_CPUID_LIMIT_WINNT) < 0) {
-          PARSE_ERR(("%s: cpuid directive malformed.", context));
-        }
 #if BX_CPU_LEVEL >= 5
       } else if (!strncmp(params[i], "mmx=", 4)) {
         if (parse_param_bool(params[i], 4, BXPN_CPUID_MMX) < 0) {
           PARSE_ERR(("%s: cpuid directive malformed.", context));
         }
+      } else if (!strncmp(params[i], "apic=", 5)) {
+        if (! SIM->get_param_enum(BXPN_CPUID_APIC)->set_by_name(&params[i][5]))
+          PARSE_ERR(("%s: unsupported apic option.", context));
+      } else if (!strncmp(params[i], "xapic=", 6)) {
+        PARSE_ERR(("%s: unsupported xapic option (deprecated).", context));
 #endif
 #if BX_CPU_LEVEL >= 6
       } else if (!strncmp(params[i], "sse=", 4)) {
         if (! SIM->get_param_enum(BXPN_CPUID_SSE)->set_by_name(&params[i][4]))
           PARSE_ERR(("%s: unsupported sse option.", context));
+      } else if (!strncmp(params[i], "sse4a=", 6)) {
+        if (parse_param_bool(params[i], 6, BXPN_CPUID_SSE4A) < 0) {
+          PARSE_ERR(("%s: cpuid directive malformed.", context));
+        }
       } else if (!strncmp(params[i], "aes=", 4)) {
         if (parse_param_bool(params[i], 4, BXPN_CPUID_AES) < 0) {
           PARSE_ERR(("%s: cpuid directive malformed.", context));
@@ -2659,10 +2690,20 @@ static int parse_line_formatted(const char *context, int num_params, char *param
         if (parse_param_bool(params[i], 6, BXPN_CPUID_XSAVE) < 0) {
           PARSE_ERR(("%s: cpuid directive malformed.", context));
         }
-      } else if (!strncmp(params[i], "xapic=", 6)) {
-        if (parse_param_bool(params[i], 6, BXPN_CPUID_XAPIC) < 0) {
+      } else if (!strncmp(params[i], "xsaveopt=", 9)) {
+        if (parse_param_bool(params[i], 9, BXPN_CPUID_XSAVEOPT) < 0) {
           PARSE_ERR(("%s: cpuid directive malformed.", context));
         }
+#if BX_SUPPORT_AVX
+      } else if (!strncmp(params[i], "avx=", 4)) {
+        SIM->get_param_num(BXPN_CPUID_AVX)->set(atol(&params[i][4]));
+      } else if (!strncmp(params[i], "avx_f16c=", 9)) {
+        if (parse_param_bool(params[i], 9, BXPN_CPUID_AVX_F16CVT) < 0) {
+          PARSE_ERR(("%s: cpuid directive malformed.", context));
+        }
+      } else if (!strncmp(params[i], "bmi=", 4)) {
+        SIM->get_param_num(BXPN_CPUID_BMI)->set(atol(&params[i][4]));
+#endif
 #if BX_SUPPORT_X86_64
       } else if (!strncmp(params[i], "1g_pages=", 9)) {
         if (parse_param_bool(params[i], 9, BXPN_CPUID_1G_PAGES) < 0) {
@@ -2677,6 +2718,10 @@ static int parse_line_formatted(const char *context, int num_params, char *param
           PARSE_ERR(("%s: cpuid directive malformed.", context));
         }
 #endif
+      } else if (!strncmp(params[i], "smep=", 5)) {
+        if (parse_param_bool(params[i], 5, BXPN_CPUID_SMEP) < 0) {
+          PARSE_ERR(("%s: cpuid directive malformed.", context));
+        }
 #if BX_SUPPORT_MONITOR_MWAIT
       } else if (!strncmp(params[i], "mwait=", 6)) {
         if (parse_param_bool(params[i], 6, BXPN_CPUID_MWAIT) < 0) {
@@ -2688,6 +2733,8 @@ static int parse_line_formatted(const char *context, int num_params, char *param
         }
 #endif
 #endif
+      } else if (!strncmp(params[i], "cpuid_limit_winnt=", 18)) {
+        PARSE_ERR(("%s: cpuid_limit_winnt moved to CPU .bochsrc option.", context));
       } else {
         PARSE_ERR(("%s: cpuid directive malformed.", context));
       }
@@ -2789,16 +2836,27 @@ static int parse_line_formatted(const char *context, int num_params, char *param
       }
     }
   } else if (!strcmp(params[0], "vga_update_interval")) {
+    Bit64u value;
     if (num_params != 2) {
       PARSE_ERR(("%s: vga_update_interval directive: wrong # args.", context));
     }
-    SIM->get_param_num(BXPN_VGA_UPDATE_INTERVAL)->set(atol(params[1]));
-  } else if (!strcmp(params[0], "vga")) {
-    if (num_params != 2) {
-      PARSE_ERR(("%s: vga directive: wrong # args.", context));
+    value = atol(params[1]);
+    if (value > 0) {
+      SIM->get_param_num(BXPN_VGA_UPDATE_FREQUENCY)->set(1000000 / value);
+      PARSE_WARN(("%s: 'vga_update_interval' will be replaced by new 'vga: update_freq' option.", context));
+    } else {
+      PARSE_ERR(("%s: invalid value for vga_update_interval", context));
     }
-    if (!strncmp(params[1], "extension=", 10)) {
-      SIM->get_param_string(BXPN_VGA_EXTENSION)->set(&params[1][10]);
+  } else if (!strcmp(params[0], "vga")) {
+    if (num_params < 2) {
+      PARSE_ERR(("%s: vga directive malformed.", context));
+    }
+    for (i=1; i<num_params; i++) {
+      if (!strncmp(params[i], "extension=", 10)) {
+        SIM->get_param_string(BXPN_VGA_EXTENSION)->set(&params[i][10]);
+      } else if (!strncmp(params[i], "update_freq=", 12)) {
+        SIM->get_param_num(BXPN_VGA_UPDATE_FREQUENCY)->set(atol(&params[i][12]));
+      }
     }
   } else if (!strcmp(params[0], "keyboard_serial_delay")) {
     if (num_params != 2) {
@@ -2817,16 +2875,7 @@ static int parse_line_formatted(const char *context, int num_params, char *param
       PARSE_ERR (("%s: keyboard_paste_delay not big enough!", context));
     }
   } else if (!strcmp(params[0], "text_snapshot_check")) {
-    if (num_params != 2) {
-      PARSE_ERR(("%s: text_snapshot_check directive: wrong # args.", context));
-    }
-    if (!strncmp(params[1], "enabled=", 8)) {
-      if (parse_param_bool(params[1], 8, BXPN_TEXT_SNAPSHOT_CHECK) < 0) {
-        PARSE_ERR(("%s: text_snapshot_check directive malformed.", context));
-      }
-    } else {
-      PARSE_ERR(("%s: text_snapshot_check directive malformed.", context));
-    }
+    PARSE_ERR(("%s: the 'text_snapshot_check' feature has been removed.", context));
   } else if (!strcmp(params[0], "mouse")) {
     if (num_params < 2) {
       PARSE_ERR(("%s: mouse directive malformed.", context));
@@ -2971,14 +3020,16 @@ static int parse_line_formatted(const char *context, int num_params, char *param
     for (i=1; i<num_params; i++) {
       if (!strncmp(params[i], "enabled=", 8)) {
         SIM->get_param_bool(BXPN_UHCI_ENABLED)->set(atol(&params[i][8]));
-      } else if (!strncmp(params[i], "port1=", 6)) {
-        SIM->get_param_string(BXPN_UHCI_PORT1_DEVICE)->set(&params[i][6]);
-      } else if (!strncmp(params[i], "options1=", 9)) {
-        SIM->get_param_string(BXPN_UHCI_PORT1_OPTIONS)->set(&params[i][9]);
-      } else if (!strncmp(params[i], "port2=", 6)) {
-        SIM->get_param_string(BXPN_UHCI_PORT2_DEVICE)->set(&params[i][6]);
-      } else if (!strncmp(params[i], "options2=", 9)) {
-        SIM->get_param_string(BXPN_UHCI_PORT2_OPTIONS)->set(&params[i][9]);
+      } else if (!strncmp(params[i], "port", 4)) {
+        base = (bx_list_c*) SIM->get_param("ports.usb.uhci");
+        if (parse_usb_port_params(context, 0, params[i], BX_N_USB_UHCI_PORTS, base) < 0) {
+          return -1;
+        }
+      } else if (!strncmp(params[i], "options", 7)) {
+        base = (bx_list_c*) SIM->get_param("ports.usb.uhci");
+        if (parse_usb_port_params(context, 1, params[i], BX_N_USB_UHCI_PORTS, base) < 0) {
+          return -1;
+        }
       } else {
         PARSE_WARN(("%s: unknown parameter '%s' for usb_uhci ignored.", context, params[i]));
       }
@@ -2987,23 +3038,57 @@ static int parse_line_formatted(const char *context, int num_params, char *param
     for (i=1; i<num_params; i++) {
       if (!strncmp(params[i], "enabled=", 8)) {
         SIM->get_param_bool(BXPN_OHCI_ENABLED)->set(atol(&params[i][8]));
-      } else if (!strncmp(params[i], "port1=", 6)) {
-        SIM->get_param_string(BXPN_OHCI_PORT1_DEVICE)->set(&params[i][6]);
-      } else if (!strncmp(params[i], "options1=", 9)) {
-        SIM->get_param_string(BXPN_OHCI_PORT1_OPTIONS)->set(&params[i][9]);
-      } else if (!strncmp(params[i], "port2=", 6)) {
-        SIM->get_param_string(BXPN_OHCI_PORT2_DEVICE)->set(&params[i][6]);
-      } else if (!strncmp(params[i], "options2=", 9)) {
-        SIM->get_param_string(BXPN_OHCI_PORT2_OPTIONS)->set(&params[i][9]);
+      } else if (!strncmp(params[i], "port", 4)) {
+        base = (bx_list_c*) SIM->get_param("ports.usb.ohci");
+        if (parse_usb_port_params(context, 0, params[i], BX_N_USB_OHCI_PORTS, base) < 0) {
+          return -1;
+        }
+      } else if (!strncmp(params[i], "options", 7)) {
+        base = (bx_list_c*) SIM->get_param("ports.usb.ohci");
+        if (parse_usb_port_params(context, 1, params[i], BX_N_USB_OHCI_PORTS, base) < 0) {
+          return -1;
+        }
       } else {
         PARSE_WARN(("%s: unknown parameter '%s' for usb_ohci ignored.", context, params[i]));
       }
     }
-  } else if (!strcmp(params[0], "i440fxsupport")) {
-    char tmpdev[80];
+  } else if (!strcmp(params[0], "usb_xhci")) {
     for (i=1; i<num_params; i++) {
       if (!strncmp(params[i], "enabled=", 8)) {
-        SIM->get_param_bool(BXPN_I440FX_SUPPORT)->set(atol(&params[i][8]));
+        SIM->get_param_bool(BXPN_XHCI_ENABLED)->set(atol(&params[i][8]));
+      } else if (!strncmp(params[i], "port", 4)) {
+        base = (bx_list_c*) SIM->get_param("ports.usb.xhci");
+        if (parse_usb_port_params(context, 0, params[i], BX_N_USB_XHCI_PORTS, base) < 0) {
+          return -1;
+        }
+      } else if (!strncmp(params[i], "options", 7)) {
+        base = (bx_list_c*) SIM->get_param("ports.usb.xhci");
+        if (parse_usb_port_params(context, 1, params[i], BX_N_USB_XHCI_PORTS, base) < 0) {
+          return -1;
+        }
+      } else {
+        PARSE_WARN(("%s: unknown parameter '%s' for usb_xhci ignored.", context, params[i]));
+      }
+    }
+  } else if ((!strcmp(params[0], "pci")) ||
+             (!strcmp(params[0], "i440fxsupport"))) {
+    // new option 'pci' for future extensions
+    char tmpdev[80];
+    int enabled = -1;
+    int chipset = -1;
+    if (!strcmp(params[0], "i440fxsupport")) {
+      chipset = 1;
+      PARSE_WARN(("%s: 'i440fxsupport' will be replaced by new 'pci' option.", context));
+    }
+    for (i=1; i<num_params; i++) {
+      if (!strncmp(params[i], "enabled=", 8)) {
+        enabled = atol(&params[i][8]);
+      } else if (!strncmp(params[i], "chipset=", 8)) {
+        if (!strcmp(&params[i][8], "i440fx")) {
+          chipset = 1;
+        } else {
+          PARSE_ERR(("%s: pci: unknown chipset '%s'", context, &params[i][8]));
+        }
       } else if ((!strncmp(params[i], "slot", 4)) && (params[i][5] == '=')) {
         slot = atol(&params[i][4]);
         if ((slot > 0) && (slot < 6)) {
@@ -3013,7 +3098,16 @@ static int parse_line_formatted(const char *context, int num_params, char *param
           BX_ERROR(("%s: unknown pci slot number ignored.", context));
         }
       } else {
-        PARSE_ERR(("%s: i440fxsupport: unknown parameter '%s'.", context, params[i]));
+        PARSE_ERR(("%s: pci: unknown parameter '%s'.", context, params[i]));
+      }
+    }
+    if (enabled == 0) {
+      SIM->get_param_bool(BXPN_I440FX_SUPPORT)->set(0);
+    } else if (enabled == 1) {
+      if (chipset == 1) {
+        SIM->get_param_bool(BXPN_I440FX_SUPPORT)->set(1);
+      } else {
+        PARSE_ERR(("%s: pci: chipset not specified", context));
       }
     }
   } else if (!strcmp(params[0], "pcidev")) {
@@ -3527,14 +3621,19 @@ int bx_write_serial_options(FILE *fp, bx_list_c *base, int n)
   return 0;
 }
 
-int bx_write_usb_options(FILE *fp, bx_list_c *base)
+int bx_write_usb_options(FILE *fp, int maxports, bx_list_c *base)
 {
+  int i;
+  char tmpname[20];
+
   fprintf(fp, "usb_%s: enabled=%d", base->get_name(), SIM->get_param_bool("enabled", base)->get());
   if (SIM->get_param_bool("enabled", base)->get()) {
-    fprintf(fp, ", port1=%s", SIM->get_param_string("port1.device", base)->getptr());
-    fprintf(fp, ", port2=%s", SIM->get_param_string("port2.device", base)->getptr());
-    fprintf(fp, ", options1=%s", SIM->get_param_string("port1.options", base)->getptr());
-    fprintf(fp, ", options2=%s", SIM->get_param_string("port2.options", base)->getptr());
+    for (i = 1; i <= maxports; i++) {
+      sprintf(tmpname, "port%d.device", i);
+      fprintf(fp, ", port%d=%s", i, SIM->get_param_string(tmpname, base)->getptr());
+      sprintf(tmpname, "port%d.options", i);
+      fprintf(fp, ", options%d=%s", i, SIM->get_param_string(tmpname, base)->getptr());
+    }
   }
   fprintf(fp, "\n");
   return 0;
@@ -3675,8 +3774,6 @@ int bx_write_log_options(FILE *fp, bx_list_c *base)
       io->getaction(logfunctions::get_default_action(LOGLEV_INFO)));
   fprintf(fp, "debug: action=%s\n",
       io->getaction(logfunctions::get_default_action(LOGLEV_DEBUG)));
-  fprintf(fp, "pass: action=%s\n",
-      io->getaction(logfunctions::get_default_action(LOGLEV_PASS)));
   return 0;
 }
 
@@ -3827,13 +3924,16 @@ int bx_write_configuration(const char *rc, int overwrite)
   }
   // usb
   base = (bx_list_c*) SIM->get_param("ports.usb.uhci");
-  bx_write_usb_options(fp, base);
+  bx_write_usb_options(fp, BX_N_USB_UHCI_PORTS, base);
   base = (bx_list_c*) SIM->get_param("ports.usb.ohci");
-  bx_write_usb_options(fp, base);
+  bx_write_usb_options(fp, BX_N_USB_OHCI_PORTS, base);
+  base = (bx_list_c*) SIM->get_param("ports.usb.xhci");
+  bx_write_usb_options(fp, BX_N_USB_XHCI_PORTS, base);
   // pci
-  fprintf(fp, "i440fxsupport: enabled=%d",
+  fprintf(fp, "pci: enabled=%d",
           SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get());
   if (SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get()) {
+    fprintf(fp, ", chipset=i440fx");
     for (i=0; i<BX_N_PCI_SLOTS; i++) {
       sprintf(tmpdev, "pci.slot.%d", i+1);
       strptr = SIM->get_param_string(tmpdev)->getptr();
@@ -3848,8 +3948,9 @@ int bx_write_configuration(const char *rc, int overwrite)
       SIM->get_param_num(BXPN_PCIDEV_VENDOR)->get(),
       SIM->get_param_num(BXPN_PCIDEV_DEVICE)->get());
   }
-  fprintf(fp, "vga_update_interval: %u\n", SIM->get_param_num(BXPN_VGA_UPDATE_INTERVAL)->get());
-  fprintf(fp, "vga: extension=%s\n", SIM->get_param_string(BXPN_VGA_EXTENSION)->getptr());
+  fprintf(fp, "vga: extension=%s, update_freq=%u\n",
+    SIM->get_param_string(BXPN_VGA_EXTENSION)->getptr(),
+    SIM->get_param_num(BXPN_VGA_UPDATE_FREQUENCY)->get());
 #if BX_SUPPORT_SMP
   fprintf(fp, "cpu: count=%u:%u:%u, ips=%u, quantum=%d, ",
     SIM->get_param_num(BXPN_CPU_NPROCESSORS)->get(), SIM->get_param_num(BXPN_CPU_NCORES)->get(),
@@ -3858,8 +3959,10 @@ int bx_write_configuration(const char *rc, int overwrite)
 #else
   fprintf(fp, "cpu: count=1, ips=%u, ", SIM->get_param_num(BXPN_IPS)->get());
 #endif
-  fprintf(fp, "reset_on_triple_fault=%d",
-    SIM->get_param_bool(BXPN_RESET_ON_TRIPLE_FAULT)->get());
+  fprintf(fp, "model=%s, reset_on_triple_fault=%d, cpuid_limit_winnt=%d",
+    SIM->get_param_enum(BXPN_CPU_MODEL)->get_selected(),
+    SIM->get_param_bool(BXPN_RESET_ON_TRIPLE_FAULT)->get(),
+    SIM->get_param_bool(BXPN_CPUID_LIMIT_WINNT)->get());
 #if BX_CPU_LEVEL >= 5
   fprintf(fp, ", ignore_bad_msrs=%d", SIM->get_param_bool(BXPN_IGNORE_BAD_MSRS)->get());
 #endif
@@ -3871,18 +3974,30 @@ int bx_write_configuration(const char *rc, int overwrite)
   fprintf(fp, "\n");
 
 #if BX_CPU_LEVEL >= 4
-  fprintf(fp, "cpuid: cpuid_limit_winnt=%d", SIM->get_param_bool(BXPN_CPUID_LIMIT_WINNT)->get());
+  fprintf(fp, "cpuid: family=%d, model=0x%02x, stepping=%d", 
+    SIM->get_param_num(BXPN_CPUID_FAMILY)->get(),
+    SIM->get_param_num(BXPN_CPUID_MODEL)->get(),
+    SIM->get_param_num(BXPN_CPUID_STEPPING)->get());
 #if BX_CPU_LEVEL >= 5
-  fprintf(fp, ", mmx=%d", SIM->get_param_bool(BXPN_CPUID_MMX)->get());
+  fprintf(fp, ", mmx=%d, apic=%s", SIM->get_param_bool(BXPN_CPUID_MMX)->get(),
+    SIM->get_param_enum(BXPN_CPUID_APIC)->get_selected());
 #endif
 #if BX_CPU_LEVEL >= 6
-  fprintf(fp, ", sse=%s, xapic=%d, sep=%d, aes=%d, xsave=%d, movbe=%d",
+  fprintf(fp, ", sse=%s, sse4a=%d, sep=%d, aes=%d, xsave=%d, xsaveopt=%d, movbe=%d, smep=%d",
     SIM->get_param_enum(BXPN_CPUID_SSE)->get_selected(),
-    SIM->get_param_bool(BXPN_CPUID_XAPIC)->get(),
+    SIM->get_param_bool(BXPN_CPUID_SSE4A)->get(),
     SIM->get_param_bool(BXPN_CPUID_SEP)->get(),
     SIM->get_param_bool(BXPN_CPUID_AES)->get(),
     SIM->get_param_bool(BXPN_CPUID_XSAVE)->get(),
-    SIM->get_param_bool(BXPN_CPUID_MOVBE)->get());
+    SIM->get_param_bool(BXPN_CPUID_XSAVEOPT)->get(),
+    SIM->get_param_bool(BXPN_CPUID_MOVBE)->get(),
+    SIM->get_param_bool(BXPN_CPUID_SMEP)->get());
+#if BX_SUPPORT_AVX
+  fprintf(fp, ", avx=%d, avx_f16c=%d, bmi=%d", 
+    SIM->get_param_num(BXPN_CPUID_AVX)->get(),
+    SIM->get_param_bool(BXPN_CPUID_AVX_F16CVT)->get(),
+    SIM->get_param_num(BXPN_CPUID_BMI)->get());
+#endif
 #if BX_SUPPORT_X86_64
   fprintf(fp, ", 1g_pages=%d, pcid=%d, fsgsbase=%d",
     SIM->get_param_bool(BXPN_CPUID_1G_PAGES)->get(),
@@ -3897,23 +4012,18 @@ int bx_write_configuration(const char *rc, int overwrite)
 #endif
   fprintf(fp, "\n");
 
-  fprintf(fp, "cpuid: family=%x, model=%02x, stepping=%d", 
-    SIM->get_param_num(BXPN_CPUID_FAMILY)->get(),
-    SIM->get_param_num(BXPN_CPUID_MODEL)->get(),
-    SIM->get_param_num(BXPN_CPUID_STEPPING)->get());
   const char *vendor_string = SIM->get_param_string(BXPN_VENDOR_STRING)->getptr();
   if (vendor_string)
-    fprintf(fp, ", vendor_string=\"%s\"", vendor_string);
+    fprintf(fp, "cpuid: vendor_string=\"%s\"\n", vendor_string);
   const char *brand_string = SIM->get_param_string(BXPN_BRAND_STRING)->getptr();
   if (brand_string)
-    fprintf(fp, ", brand_string=\"%s\"", brand_string);
+    fprintf(fp, "cpuid: brand_string=\"%s\"\n", brand_string);
   fprintf(fp, "\n");
 #endif
 
   fprintf(fp, "print_timestamps: enabled=%d\n", bx_dbg.print_timestamps);
   bx_write_debugger_options(fp);
   fprintf(fp, "port_e9_hack: enabled=%d\n", SIM->get_param_bool(BXPN_PORT_E9_HACK)->get());
-  fprintf(fp, "text_snapshot_check: enabled=%d\n", SIM->get_param_bool(BXPN_TEXT_SNAPSHOT_CHECK)->get());
   fprintf(fp, "private_colormap: enabled=%d\n", SIM->get_param_bool(BXPN_PRIVATE_COLORMAP)->get());
 #if BX_WITH_AMIGAOS
   fprintf(fp, "fullscreen: enabled=%d\n", SIM->get_param_bool(BXPN_FULLSCREEN)->get());

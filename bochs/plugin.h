@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2009  The Bochs Project
+//  Copyright (C) 2002-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -59,6 +59,7 @@ extern "C" {
 #define BX_PLUGIN_SOUNDMOD  "soundmod"
 #define BX_PLUGIN_SB16      "sb16"
 #define BX_PLUGIN_ES1370    "es1370"
+#define BX_PLUGIN_NETMOD    "netmod"
 #define BX_PLUGIN_NE2K      "ne2k"
 #define BX_PLUGIN_EXTFPUIRQ "extfpuirq"
 #define BX_PLUGIN_PCIVGA    "pcivga"
@@ -66,6 +67,7 @@ extern "C" {
 #define BX_PLUGIN_USB_COMMON "usb_common"
 #define BX_PLUGIN_USB_UHCI  "usb_uhci"
 #define BX_PLUGIN_USB_OHCI  "usb_ohci"
+#define BX_PLUGIN_USB_XHCI  "usb_xhci"
 #define BX_PLUGIN_PCIPNIC   "pcipnic"
 #define BX_PLUGIN_GAMEPORT  "gameport"
 #define BX_PLUGIN_SPEAKER   "speaker"
@@ -163,8 +165,6 @@ extern "C" {
     (bx_devices.pluginHardDrive->virt_write_handler(b, c, d))
 #define DEV_hd_get_first_cd_handle() \
     (bx_devices.pluginHardDrive->get_first_cd_handle())
-#define DEV_hd_get_device_handle(a,b) \
-    (bx_devices.pluginHardDrive->get_device_handle(a,b))
 #define DEV_hd_get_cd_media_status(handle) \
     (bx_devices.pluginHardDrive->get_cd_media_status(handle))
 #define DEV_hd_set_cd_media_status(handle, status) \
@@ -174,6 +174,7 @@ extern "C" {
 #define DEV_hd_bmdma_write_sector(a,b) bx_devices.pluginHardDrive->bmdma_write_sector(a,b)
 #define DEV_hd_bmdma_complete(a) bx_devices.pluginHardDrive->bmdma_complete(a)
 #define DEV_hdimage_init_image(a,b,c) bx_devices.pluginHDImageCtl->init_image(a,b,c)
+#define DEV_hdimage_init_cdrom(a) bx_devices.pluginHDImageCtl->init_cdrom(a)
 
 #define DEV_bulk_io_quantum_requested() (bx_devices.bulkIOQuantumsRequested)
 #define DEV_bulk_io_quantum_transferred() (bx_devices.bulkIOQuantumsTransferred)
@@ -208,8 +209,11 @@ extern "C" {
 #define DEV_vga_mem_write(addr, val) (bx_devices.pluginVgaDevice->mem_write(addr, val))
 #define DEV_vga_redraw_area(left, top, right, bottom) \
   (bx_devices.pluginVgaDevice->redraw_area(left, top, right, bottom))
+#define DEV_vga_get_snapshot_mode() bx_devices.pluginVgaDevice->get_snapshot_mode()
 #define DEV_vga_get_text_snapshot(rawsnap, height, width) \
   (bx_devices.pluginVgaDevice->get_text_snapshot(rawsnap, height, width))
+#define DEV_vga_get_gfx_snapshot(rawsnap, palette, height, width, depth) \
+  (bx_devices.pluginVgaDevice->get_gfx_snapshot(rawsnap, palette, height, width, depth))
 #define DEV_vga_refresh() \
   (bx_devices.pluginVgaDevice->trigger_timer(bx_devices.pluginVgaDevice))
 #define DEV_vga_get_actl_pal_idx(index) (bx_devices.pluginVgaDevice->get_actl_palette_idx(index))
@@ -243,15 +247,23 @@ extern "C" {
 ///////// Memory macros
 #define DEV_register_memory_handlers(param,rh,wh,b,e) \
     bx_devices.mem->registerMemoryHandlers(param,rh,wh,b,e)
-#define DEV_unregister_memory_handlers(rh,wh,b,e) \
-    bx_devices.mem->unregisterMemoryHandlers(rh,wh,b,e)
+#define DEV_unregister_memory_handlers(param,b,e) \
+    bx_devices.mem->unregisterMemoryHandlers(param,b,e)
 
 ///////// USB device macros
 #define DEV_usb_init_device(a,b,c,d) (usbdev_type)bx_devices.pluginUsbDevCtl->init_device(a,b,(void**)c,d)
 #define DEV_usb_send_msg(a,b) bx_devices.pluginUsbDevCtl->usb_send_msg((void*)a,b)
 
-///////// Sound macro
-#define DEV_sound_init_module(a,b,c) bx_devices.pluginSoundModCtl->init_module(a,(void**)b,c)
+///////// Sound module macro
+#define DEV_sound_init_module(a,b) \
+  ((bx_sound_lowlevel_c*)bx_devices.pluginSoundModCtl->init_module(a,b))
+
+///////// Networking module macro
+#define DEV_net_init_module(a,b,c) \
+  ((eth_pktmover_c*)bx_devices.pluginNetModCtl->init_module(a,(void*)b,c))
+
+///////// Gameport macro
+#define DEV_gameport_set_enabled(a) bx_devices.pluginGameport->set_enabled(a)
 
 
 #if BX_HAVE_DLFCN_H
@@ -371,9 +383,15 @@ void plugin_fini(void);
 int plugin_init(plugin_t *plugin, plugintype_t type, int argc, char *argv[]);
 
 // still in extern "C"
+#if BX_PLUGINS && defined(_MSC_VER)
+#define DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(mod) \
+  extern "C" __declspec(dllexport) int __cdecl lib##mod##_LTX_plugin_init(plugin_t *plugin, plugintype_t type, int argc, char *argv[]); \
+  extern "C" __declspec(dllexport) void __cdecl lib##mod##_LTX_plugin_fini(void);
+#else
 #define DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(mod) \
   int lib##mod##_LTX_plugin_init(plugin_t *plugin, plugintype_t type, int argc, char *argv[]); \
   void lib##mod##_LTX_plugin_fini(void);
+#endif
 
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(harddrv)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(hdimage)
@@ -397,11 +415,13 @@ DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(pcidev)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(usb_common)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(usb_uhci)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(usb_ohci)
-DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(pcipnic)
+DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(usb_xhci)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(soundmod)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(sb16)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(es1370)
+DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(netmod)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(ne2k)
+DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(pcipnic)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(extfpuirq)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(gameport)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(speaker)
@@ -409,7 +429,6 @@ DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(acpi)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(iodebug)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(ioapic)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(amigaos)
-DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(beos)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(carbon)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(macintosh)
 DECLARE_PLUGIN_INIT_FINI_FOR_MODULE(nogui)

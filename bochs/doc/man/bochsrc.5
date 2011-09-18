@@ -1,5 +1,5 @@
 .\"Document Author:  Timothy R. Butler   -   tbutler@uninetsolutions.com"
-.TH bochsrc 5 "13 Mar 2011" "bochsrc" "The Bochs Project"
+.TH bochsrc 5 "31 Jul 2011" "bochsrc" "The Bochs Project"
 .\"SKIP_SECTION"
 .SH NAME
 bochsrc \- Configuration file for Bochs.
@@ -74,7 +74,6 @@ The choices are:
   x           X windows interface, cross platform
   win32       native win32 libraries
   carbon      Carbon library (for MacOS X)
-  beos        native BeOS libraries
   macintosh   MacOS pre-10
   amigaos     native AmigaOS libraries
   sdl         SDL library, cross platform
@@ -140,6 +139,11 @@ Reset the CPU when triple fault occur (highly recommended) rather than
 PANIC. Remember that if you trying to continue after triple fault the
 simulation will be completely bogus !
 
+cpuid_limit_winnt:
+
+Determine whether to limit maximum CPUID function to 2. This mode is
+required to workaround WinNT installation and boot issues.
+
 msrs:
 
 Define path to user CPU Model Specific Registers (MSRs) specification.
@@ -170,12 +174,12 @@ BogoMips and other benchmarks.
 
 Example Specifications[1]
  Bochs Machine/Compiler                                Mips
- -------------------------------------------------------------------
- 2.3.7 3.2Ghz Intel Core 2 Q9770 with WinXP/g++ 3.4    50 to 55 Mips
- 2.3.7 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4      38 to 43 Mips
- 2.2.6 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4      21 to 25 Mips
- 2.2.6 2.1Ghz Athlon XP with Linux 2.6/g++ 3.4         12 to 15 Mips
- 2.0.1 1.6Ghz Intel P4 with Win2000/g++ 3.3             5 to  7 Mips
+ --------------------------------------------------------------------
+ 2.4.6 3.4Ghz Intel Core i7 2600 with Win7x64/g++ 4.5.2 85 to 95 Mips
+ 2.3.7 3.2Ghz Intel Core 2 Q9770 with WinXP/g++ 3.4     50 to 55 Mips
+ 2.3.7 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4       38 to 43 Mips
+ 2.2.6 2.6Ghz Intel Core 2 Duo with WinXP/g++ 3.4       21 to 25 Mips
+ 2.2.6 2.1Ghz Athlon XP with Linux 2.6/g++ 3.4          12 to 15 Mips
 
  [1]  IPS measurements depend on OS and compiler
 configuration  in addition  to processor clock
@@ -193,6 +197,11 @@ mmx:
 Select MMX instruction set support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
 
+apic:
+
+Select APIC configuration (LEGACY/XAPIC/X2APIC).
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 5.
+
 sep:
 
 Select SYSENTER/SYSEXIT instruction set support.
@@ -204,9 +213,9 @@ Select SSE instruction set support.
 Any of NONE/SSE/SSE2/SSE3/SSSE3/SSE4_1/SSE4_2 could be selected.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 
-xapic:
+sse4a:
 
-Select XAPIC extensions support.
+Select AMD SSE4A instructions support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 
 aes:
@@ -224,6 +233,26 @@ xsave:
 Select XSAVE extensions support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 
+xsaveopt:
+
+Select XSAVEOPT instruction support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+
+avx:
+
+Select AVX/AVX2 instruction set support.
+This option exists only if Bochs compiled with --enable-avx option.
+
+avx_f16c:
+
+Select AVX float16 convert instructions support.
+This option exists only if Bochs compiled with --enable-avx option.
+
+bmi:
+
+Select BMI1/BMI2 instructions support.
+This option exists only if Bochs compiled with --enable-avx option.
+
 1g_pages:
 
 Enable 1G page size support in long mode.
@@ -233,6 +262,11 @@ pcid:
 
 Enable Process-Context Identifiers (PCID) support in long mode.
 This option exists only if Bochs compiled with x86-64 support.
+
+smep:
+
+Enable Supervisor Mode Execution Protection (SMEP) support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 
 mwait:
 
@@ -267,13 +301,8 @@ brand_string:
 Set the CPUID vendor string returned by CPUID(0x80000002 .. 0x80000004).
 This should be at most a forty-eight-character ASCII string.
 
-cpuid_limit_winnt:
-
-Determine whether to limit maximum CPUID function to 3. This mode is
-required to workaround WinNT installation and boot issues.
-
 Example:
-  cpuid: mmx=1, sep=1, sse=sse4_2, xapic=1, aes=1, movbe=1, xsave=1, cpuid_limit_winnt=0
+  cpuid: mmx=1, sep=1, sse=sse4_2, xapic=1, aes=1, movbe=1, xsave=1
 
 .TP
 .I "megs:"
@@ -804,14 +833,14 @@ Example:
   private_colormap: enabled=1
 
 .TP
-.I "i440fxsupport:"
+.I "pci:"
 This option controls the presence of the i440FX PCI chipset. You can
 also specify the devices connected to PCI slots. Up to 5 slots are
 available now. These devices are currently supported: cirrus, es1370, ne2k,
 pcivga, pcidev, pcipnic and usb_ohci.
 
 Example:
-  i440fxsupport: enabled=1, slot1=pcivga, slot2=ne2k
+  pci: enabled=1, chipset=i440fx, slot1=pcivga, slot2=ne2k
 
 .TP
 .I "pcidev:"
@@ -861,7 +890,6 @@ to access physical ethernet interface. Current implemented values include
 If you don't want to make connections to any physical networks,
 you can use the following 'ethmod's to simulate a virtual network.
  - null   : All packets are discarded, but logged to a few files
- - arpback: ARP is simulated (disabled by default)
  - vde    : Virtual Distributed Ethernet
  - vnet   : ARP, ICMP-echo(ping), DHCP and TFTP are simulated
             The virtual host uses 192.168.10.1

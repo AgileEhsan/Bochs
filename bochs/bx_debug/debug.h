@@ -184,7 +184,7 @@ typedef enum _show_flags {
   Flag_softint = 0x4,
   Flag_iret    = 0x8,
   Flag_intsig  = 0x10,
-  Flag_mode    = 0x20
+  Flag_mode    = 0x20,
 } show_flags_t;
 
 // Flex defs
@@ -229,6 +229,7 @@ extern int timebp_queue_size;
 void bx_dbg_record_command(char*);
 void bx_dbg_playback_command(char*);
 void bx_dbg_modebp_command(void);
+void bx_dbg_vmexitbp_command(void);
 void bx_dbg_where_command(void);
 void bx_dbg_print_string_command(bx_address addr);
 void bx_dbg_xlate_address(bx_lin_address address);
@@ -335,7 +336,8 @@ typedef enum {
   STOP_WRITE_WATCH_POINT,
   STOP_MAGIC_BREAK_POINT,
   STOP_MODE_BREAK_POINT,
-  STOP_CPU_HALTED
+  STOP_VMEXIT_BREAK_POINT,
+  STOP_CPU_HALTED,
 } stop_reason_t;
 
 typedef enum {
@@ -378,7 +380,7 @@ void bx_dbg_exit(int code);
                                 BX_DBG_GUARD_IADDR_LIN | \
                                 BX_DBG_GUARD_IADDR_PHY)
 
-#define BX_DBG_GUARD_CTRL_C        0x0100
+#define BX_DBG_GUARD_ICOUNT        0x0010
 
 typedef struct {
   unsigned guard_for;
@@ -414,7 +416,7 @@ typedef struct {
 #endif
   } iaddr;
 
-  // user typed Ctrl-C, requesting simulator stop at next convient spot
+  // user typed Ctrl-C, requesting simulator stop at next convinient spot
   volatile bx_bool interrupt_requested;
 
   // booleans to control whether simulator should report events
@@ -453,15 +455,13 @@ typedef struct {
 // is reached (found)
 typedef struct bx_guard_found_t {
   unsigned guard_found;
+  Bit64u icount_max; // stop after completing this many instructions
   unsigned iaddr_index;
-  Bit64u icount; // number of completed instructions from last breakpoint hit
-  Bit32u cs;     // cs:eip and linear addr of instruction at guard point
+  Bit32u cs; // cs:eip and linear addr of instruction at guard point
   bx_address eip;
   bx_address laddr;
   // 00 - 16 bit, 01 - 32 bit, 10 - 64-bit, 11 - illegal
   unsigned code_32_64; // CS seg size at guard point
-  bx_bool ctrl_c; // simulator stopped due to Ctrl-C request
-  Bit64u  time_tick; // time tick when guard reached
 } bx_guard_found_t;
 
 struct bx_watchpoint {

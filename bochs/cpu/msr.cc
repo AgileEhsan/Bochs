@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//   Copyright (c) 2008-2010 Stanislav Shwartsman
+//   Copyright (c) 2008-2011 Stanislav Shwartsman
 //          Written by Stanislav Shwartsman [sshwarts at sourceforge net]
 //
 //  This library is free software; you can redistribute it and/or
@@ -26,12 +26,6 @@
 #include "cpu.h"
 #define LOG_THIS BX_CPU_THIS_PTR
 
-#if BX_SUPPORT_X86_64==0
-// Make life easier for merging code.
-#define RAX EAX
-#define RDX EDX
-#endif
-
 #if BX_CPU_LEVEL >= 5
 bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::rdmsr(Bit32u index, Bit64u *msr)
 {
@@ -40,12 +34,14 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::rdmsr(Bit32u index, Bit64u *msr)
   if ((index & 0x3FFFFFFF) >= BX_MSR_MAX_INDEX)
     return 0;
 
-#if BX_SUPPORT_X2APIC
-  if (index >= 0x800 && index <= 0xBFF) {
-    if (BX_CPU_THIS_PTR msr.apicbase & 0x400)  // X2APIC mode
-      return BX_CPU_THIS_PTR lapic.read_x2apic(index, msr);
-    else
-      return 0;
+#if BX_CPU_LEVEL >= 6
+  if (bx_cpuid_support_x2apic()) {
+    if (index >= 0x800 && index <= 0xBFF) {
+      if (BX_CPU_THIS_PTR msr.apicbase & 0x400)  // X2APIC mode
+        return BX_CPU_THIS_PTR lapic.read_x2apic(index, msr);
+      else
+        return 0;
+    }
   }
 #endif
 
@@ -210,15 +206,20 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::rdmsr(Bit32u index, Bit64u *msr)
       break;
 #endif
 
-#if BX_SUPPORT_X86_64
+#if BX_CPU_LEVEL >= 5
     case BX_MSR_EFER:
+      if (! BX_CPU_THIS_PTR efer_suppmask)
+        return 0;
+
       val64 = BX_CPU_THIS_PTR efer.get32();
       break;
 
     case BX_MSR_STAR:
       val64 = MSR_STAR;
       break;
+#endif
 
+#if BX_SUPPORT_X86_64
     case BX_MSR_LSTAR:
       val64 = MSR_LSTAR;
       break;
@@ -244,22 +245,37 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::rdmsr(Bit32u index, Bit64u *msr)
       break;
 
     case BX_MSR_TSC_AUX:
+      if (! bx_cpuid_support_rdtscp()) {
+        // failed to find the MSR, could #GP or ignore it silently
+        BX_ERROR(("RDMSR MSR_TSC_AUX: RTDSCP feature not enabled !"));
+        if (! BX_CPU_THIS_PTR ignore_bad_msrs)
+          return 0; // will result in #GP fault due to unknown MSR
+      }
       val64 = MSR_TSC_AUX;   // 32 bit MSR
       break;
-#endif  // #if BX_SUPPORT_X86_64
-
-    default:
-#if BX_CONFIGURE_MSRS
-      if (index < BX_MSR_MAX_INDEX && BX_CPU_THIS_PTR msrs[index]) {
-        val64 = BX_CPU_THIS_PTR msrs[index]->get64();
-        break;
-      }
 #endif
-      // failed to find the MSR, could #GP or ignore it silently
-      BX_ERROR(("RDMSR: Unknown register %#x", index));
 
-      if (! BX_CPU_THIS_PTR ignore_bad_msrs)
-        return 0; // will result in #GP fault due to unknown MSR
+    default: {
+      // Try to check cpuid_t first (can implement some MSRs)
+      int result = BX_CPU_THIS_PTR cpuid->rdmsr(index, &val64);
+      if (result == 0)
+        return 0; // #GP fault due to not supported MSR
+
+      if (result < 0) {
+        // cpuid_t have no idea about this MSR
+#if BX_CONFIGURE_MSRS
+        if (index < BX_MSR_MAX_INDEX && BX_CPU_THIS_PTR msrs[index]) {
+          val64 = BX_CPU_THIS_PTR msrs[index]->get64();
+          break;
+        }
+#endif
+        // failed to find the MSR, could #GP or ignore it silently
+        BX_ERROR(("RDMSR: Unknown register %#x", index));
+
+        if (! BX_CPU_THIS_PTR ignore_bad_msrs)
+          return 0; // will result in #GP fault due to unknown MSR
+      }
+    }
   }
 
   BX_DEBUG(("RDMSR: read %08x:%08x from MSR %x", GET32H(val64), GET32L(val64), index));
@@ -269,10 +285,11 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::rdmsr(Bit32u index, Bit64u *msr)
 }
 #endif // BX_CPU_LEVEL >= 5
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDMSR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::RDMSR(bxInstruction_c *i)
 {
 #if BX_CPU_LEVEL >= 5
-  if (!real_mode() && CPL != 0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("RDMSR: CPL != 0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -281,7 +298,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDMSR(bxInstruction_c *i)
   Bit64u val64 = 0;
 
 #if BX_SUPPORT_VMX
-  VMexit_MSR(i, VMX_VMEXIT_RDMSR, index);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_MSR(i, VMX_VMEXIT_RDMSR, index);
 #endif
 
 #if BX_SUPPORT_VMX >= 2
@@ -289,7 +307,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDMSR(bxInstruction_c *i)
     if (SECONDARY_VMEXEC_CONTROL(VMX_VM_EXEC_CTRL3_VIRTUALIZE_X2APIC_MODE)) {
       RAX = VMX_Read_VTPR() & 0xff;
       RDX = 0;
-      return;
+      BX_NEXT_INSTR(i);
     }
   }
 #endif
@@ -300,6 +318,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDMSR(bxInstruction_c *i)
   RAX = GET32L(val64);
   RDX = GET32H(val64);
 #endif
+
+  BX_NEXT_INSTR(i);
 }
 
 #if BX_CPU_LEVEL >= 6
@@ -364,12 +384,14 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::wrmsr(Bit32u index, Bit64u val_64)
   if ((index & 0x3FFFFFFF) >= BX_MSR_MAX_INDEX)
     return 0;
 
-#if BX_SUPPORT_X2APIC
-  if (index >= 0x800 && index <= 0xBFF) {
-    if (BX_CPU_THIS_PTR msr.apicbase & 0x400)  // X2APIC mode
-      return BX_CPU_THIS_PTR lapic.write_x2apic(index, val_64);
-    else
-      return 0;
+#if BX_CPU_LEVEL >= 6
+  if (bx_cpuid_support_x2apic()) {
+    if (index >= 0x800 && index <= 0xBFF) {
+      if (BX_CPU_THIS_PTR msr.apicbase & 0x400)  // X2APIC mode
+        return BX_CPU_THIS_PTR lapic.write_x2apic(index, val_64);
+      else
+        return 0;
+    }
   }
 #endif
 
@@ -563,29 +585,17 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::wrmsr(Bit32u index, Bit64u val_64)
       return 0;
 #endif
 
-#if BX_SUPPORT_X86_64
+#if BX_CPU_LEVEL >= 5
     case BX_MSR_EFER:
-      if (val_64 & ~BX_EFER_SUPPORTED_BITS) {
-        BX_ERROR(("WRMSR: attempt to set reserved bits of EFER MSR !"));
-        return 0;
-      }
-
-      /* #GP(0) if changing EFER.LME when cr0.pg = 1 */
-      if ((BX_CPU_THIS_PTR efer.get_LME() != ((val32_lo >> 8) & 1)) &&
-           BX_CPU_THIS_PTR  cr0.get_PG())
-      {
-        BX_ERROR(("WRMSR: attempt to change LME when CR0.PG=1"));
-        return 0;
-      }
-
-      BX_CPU_THIS_PTR efer.set32((val32_lo & BX_EFER_SUPPORTED_BITS & ~BX_EFER_LMA_MASK)
-              | (BX_CPU_THIS_PTR efer.get32() & BX_EFER_LMA_MASK)); // keep LMA untouched
+      if (! SetEFER(val_64)) return 0;
       break;
 
     case BX_MSR_STAR:
       MSR_STAR = val_64;
       break;
+#endif
 
+#if BX_SUPPORT_X86_64
     case BX_MSR_LSTAR:
       if (! IsCanonical(val_64)) {
         BX_ERROR(("WRMSR: attempt to write non-canonical value to MSR_LSTAR !"));
@@ -631,24 +641,39 @@ bx_bool BX_CPP_AttrRegparmN(2) BX_CPU_C::wrmsr(Bit32u index, Bit64u val_64)
       break;
 
     case BX_MSR_TSC_AUX:
+      if (! bx_cpuid_support_rdtscp()) {
+        // failed to find the MSR, could #GP or ignore it silently
+        BX_ERROR(("WRMSR MSR_TSC_AUX: RTDSCP feature not enabled !"));
+        if (! BX_CPU_THIS_PTR ignore_bad_msrs)
+          return 0; // will result in #GP fault due to unknown MSR
+      }
       MSR_TSC_AUX = val32_lo;
       break;
 #endif  // #if BX_SUPPORT_X86_64
 
-    default:
+    default: {
+      // Try to check cpuid_t first (can implement some MSRs)
+      int result = BX_CPU_THIS_PTR cpuid->wrmsr(index, val_64);
+      if (result == 0)
+        return 0; // #GP fault due to not supported MSR
+
+      if (result < 0) {
+        // cpuid_t have no idea about this MSR
 #if BX_CONFIGURE_MSRS
-      if (index < BX_MSR_MAX_INDEX && BX_CPU_THIS_PTR msrs[index]) {
-        if (! BX_CPU_THIS_PTR msrs[index]->set64(val_64)) {
-          BX_ERROR(("WRMSR: Write failed to MSR %#x - #GP fault", index));
-          return 0;
+        if (index < BX_MSR_MAX_INDEX && BX_CPU_THIS_PTR msrs[index]) {
+          if (! BX_CPU_THIS_PTR msrs[index]->set64(val_64)) {
+            BX_ERROR(("WRMSR: Write failed to MSR %#x - #GP fault", index));
+            return 0;
+          }
+          break;
         }
-        break;
-      }
 #endif
-      // failed to find the MSR, could #GP or ignore it silently
-      BX_ERROR(("WRMSR: Unknown register %#x", index));
-      if (! BX_CPU_THIS_PTR ignore_bad_msrs)
-        return 0; // will result in #GP fault due to unknown MSR
+        // failed to find the MSR, could #GP or ignore it silently
+        BX_ERROR(("WRMSR: Unknown register %#x", index));
+        if (! BX_CPU_THIS_PTR ignore_bad_msrs)
+          return 0; // will result in #GP fault due to unknown MSR
+      }
+    }
   }
 
   return 1;
@@ -668,7 +693,7 @@ bx_bool BX_CPU_C::relocate_apic(Bit64u val_64)
    * [M:63]  Reserved
    */
 
-#define BX_MSR_APICBASE_RESERVED_BITS (0x2ff | (BX_SUPPORT_X2APIC ? 0 : 0x400))
+#define BX_MSR_APICBASE_RESERVED_BITS (0x2ff | (bx_cpuid_support_x2apic() ? 0 : 0x400))
 
   if (BX_CPU_THIS_PTR msr.apicbase & 0x800) {
     Bit32u val32_hi = GET32H(val_64), val32_lo = GET32L(val_64);
@@ -684,16 +709,18 @@ bx_bool BX_CPU_C::relocate_apic(Bit64u val_64)
       return 0;
     }
 
-#if BX_SUPPORT_X2APIC
-    unsigned apic_state = (BX_CPU_THIS_PTR msr.apicbase >> 10) & 3;
-    unsigned new_state = (val32_lo >> 10) & 3;
-    if (new_state == BX_APIC_STATE_INVALID) {
-      BX_ERROR(("relocate_apic: attempt to set invalid apic state"));
-      return 0;
-    }
-    if (apic_state == BX_APIC_X2APIC_MODE && new_state != BX_APIC_GLOBALLY_DISABLED) {
-      BX_ERROR(("relocate_apic: attempt to switch from x2apic -> xapic"));
-      return 0;
+#if BX_CPU_LEVEL >= 6
+    if (bx_cpuid_support_x2apic()) {
+      unsigned apic_state = (BX_CPU_THIS_PTR msr.apicbase >> 10) & 3;
+      unsigned new_state = (val32_lo >> 10) & 3;
+      if (new_state == BX_APIC_STATE_INVALID) {
+        BX_ERROR(("relocate_apic: attempt to set invalid apic state"));
+        return 0;
+      }
+      if (apic_state == BX_APIC_X2APIC_MODE && new_state != BX_APIC_GLOBALLY_DISABLED) {
+        BX_ERROR(("relocate_apic: attempt to switch from x2apic -> xapic"));
+        return 0;
+      }
     }
 #endif
 
@@ -701,12 +728,6 @@ bx_bool BX_CPU_C::relocate_apic(Bit64u val_64)
     BX_CPU_THIS_PTR lapic.set_base(BX_CPU_THIS_PTR msr.apicbase);
     // TLB flush is required for emulation correctness
     TLB_flush();  // don't care about performance of apic relocation
-
-    if ((val32_lo & 0x800) == 0) {
-      // APIC global enable bit cleared, clear APIC on chip CPUID feature flag
-      BX_CPU_THIS_PTR cpuid_std_function[0x1].edx &= ~BX_CPUID_STD_APIC;
-      BX_CPU_THIS_PTR cpuid_ext_function[0x1].edx &= ~BX_CPUID_STD_APIC;
-    }
   }
   else {
     BX_INFO(("WRMSR: MSR_APICBASE APIC global enable bit cleared !"));
@@ -716,10 +737,11 @@ bx_bool BX_CPU_C::relocate_apic(Bit64u val_64)
 }
 #endif
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::WRMSR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::WRMSR(bxInstruction_c *i)
 {
 #if BX_CPU_LEVEL >= 5
-  if (!real_mode() && CPL != 0) {
+  // CPL is always 0 in real mode
+  if (/* !real_mode() && */ CPL!=0) {
     BX_ERROR(("WRMSR: CPL != 0 not in real mode"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -728,14 +750,15 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::WRMSR(bxInstruction_c *i)
   Bit32u index = ECX;
 
 #if BX_SUPPORT_VMX
-  VMexit_MSR(i, VMX_VMEXIT_WRMSR, index);
+  if (BX_CPU_THIS_PTR in_vmx_guest)
+    VMexit_MSR(i, VMX_VMEXIT_WRMSR, index);
 #endif
 
 #if BX_SUPPORT_VMX >= 2
   if (BX_CPU_THIS_PTR in_vmx_guest && index == 0x808) {
     if (SECONDARY_VMEXEC_CONTROL(VMX_VM_EXEC_CTRL3_VIRTUALIZE_X2APIC_MODE)) {
       VMX_Write_VTPR(AL);
-      return;
+      BX_NEXT_INSTR(i);
     }
   }
 #endif
@@ -743,6 +766,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::WRMSR(bxInstruction_c *i)
   if (! wrmsr(index, val_64))
     exception(BX_GP_EXCEPTION, 0);
 #endif
+
+  BX_NEXT_INSTR(i);
 }
 
 #if BX_CONFIGURE_MSRS

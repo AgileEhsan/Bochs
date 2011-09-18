@@ -26,14 +26,8 @@
 #include "cpu.h"
 #define LOG_THIS BX_CPU_THIS_PTR
 
-// Make code more tidy with a few macros.
-#if BX_SUPPORT_X86_64==0
-#define RAX EAX
-#define RDX EDX
-#endif
-
 /* 0F AE /4 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::XSAVE(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::XSAVE(bxInstruction_c *i)
 {
 #if BX_CPU_LEVEL >= 6
   unsigned index;
@@ -170,10 +164,12 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XSAVE(bxInstruction_c *i)
   // always update header to 'dirty' state
   write_virtual_qword(i->seg(), (eaddr + 512) & asize_mask, header1);
 #endif
+
+  BX_NEXT_INSTR(i);
 }
 
 /* 0F AE /5 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::XRSTOR(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::XRSTOR(bxInstruction_c *i)
 {
 #if BX_CPU_LEVEL >= 6
   unsigned index;
@@ -221,6 +217,10 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XRSTOR(bxInstruction_c *i)
       BX_CPU_THIS_PTR the_i387.cwd =  xmm.xmm16u(0);
       BX_CPU_THIS_PTR the_i387.swd =  xmm.xmm16u(1);
       BX_CPU_THIS_PTR the_i387.tos = (xmm.xmm16u(1) >> 11) & 0x07;
+
+      /* always set bit 6 as '1 */
+      BX_CPU_THIS_PTR the_i387.cwd =
+         (BX_CPU_THIS_PTR the_i387.cwd & ~FPU_CW_Reserved_Bits) | 0x0040;
 
       /* Restore x87 FPU Opcode */
       /* The lower 11 bits contain the FPU opcode, upper 5 bits are reserved */
@@ -286,7 +286,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XRSTOR(bxInstruction_c *i)
       BX_CPU_THIS_PTR the_i387.init();
 
       for (index=0;index<8;index++) {
-        floatx80 reg = { 0, 0 };
+        static floatx80 reg = { 0, 0 };
         BX_FPU_REG(index) = reg;
       }
     }
@@ -351,10 +351,12 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XRSTOR(bxInstruction_c *i)
   }
 #endif
 #endif
+
+  BX_NEXT_INSTR(i);
 }
 
 /* 0F 01 D0 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::XGETBV(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::XGETBV(bxInstruction_c *i)
 {
 #if BX_CPU_LEVEL >= 6
   if(! BX_CPU_THIS_PTR cr4.get_OSXSAVE()) {
@@ -372,10 +374,12 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XGETBV(bxInstruction_c *i)
   RDX = 0;
   RAX = BX_CPU_THIS_PTR xcr0.get32();
 #endif
+
+  BX_NEXT_INSTR(i);
 }
 
 /* 0F 01 D1 */
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::XSETBV(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::XSETBV(bxInstruction_c *i)
 {
 #if BX_CPU_LEVEL >= 6
   if(! BX_CPU_THIS_PTR cr4.get_OSXSAVE()) {
@@ -383,7 +387,15 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XSETBV(bxInstruction_c *i)
     exception(BX_UD_EXCEPTION, 0);
   }
 
-  if (v8086_mode() || CPL != 0) {
+#if BX_SUPPORT_VMX
+  if (BX_CPU_THIS_PTR in_vmx_guest) {
+    BX_ERROR(("VMEXIT: XSETBV in VMX non-root operation"));
+    VMexit(i, VMX_VMEXIT_XSETBV, 0);
+  }
+#endif
+
+  // CPL is always 3 in vm8086 mode
+  if (/* v8086_mode() || */ CPL != 0) {
     BX_ERROR(("XSETBV: The current priveledge level is not 0"));
     exception(BX_GP_EXCEPTION, 0);
   }
@@ -400,10 +412,20 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::XSETBV(bxInstruction_c *i)
     exception(BX_GP_EXCEPTION, 0);
   }
 
+#if BX_SUPPORT_AVX
+  if ((EAX & (BX_XCR0_AVX_BIT | BX_XCR0_SSE_BIT)) == BX_XCR0_AVX_BIT) {
+    BX_ERROR(("XSETBV: Attempting to set AVX without SSE!"));
+    exception(BX_GP_EXCEPTION, 0);
+  }
+#endif
+
   BX_CPU_THIS_PTR xcr0.set32(EAX);
 
 #if BX_SUPPORT_AVX
   handleAvxModeChange();
 #endif
-#endif
+
+#endif // BX_CPU_LEVEL >= 6
+
+  BX_NEXT_TRACE(i);
 }

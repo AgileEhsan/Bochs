@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2010  The Bochs Project
+//  Copyright (C) 2001-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -102,8 +102,6 @@ extern "C" {
 
 #include "osdep.h"       /* platform dependent includes and defines */
 #include "bx_debug/debug.h"
-#include "bxversion.h"
-
 #include "gui/siminterface.h"
 
 // BX_SHARE_PATH should be defined by the makefile.  If not, give it
@@ -176,9 +174,7 @@ void print_tree(bx_param_c *node, int level = 0);
 #define BX_TICKN(n)                 bx_pc_system.tickn(n)
 #define BX_INTR                     bx_pc_system.INTR
 #define BX_SET_INTR(b)              bx_pc_system.set_INTR(b)
-#define BX_CPU_C                    bx_cpu_c
-#define BX_MEM_C                    bx_mem_c
-#define BX_HRQ                      (bx_pc_system.HRQ)
+#define BX_HRQ                      bx_pc_system.HRQ
 
 #if BX_SUPPORT_SMP
 #define BX_CPU(x)                   (bx_cpu_array[x])
@@ -195,16 +191,6 @@ void print_tree(bx_param_c *node, int level = 0);
 #  define A20ADDR(x)                ((bx_phy_address)(x) & bx_pc_system.a20_mask)
 #else
 #  define A20ADDR(x)                ((bx_phy_address)(x))
-#endif
-
-#if BX_SUPPORT_SMP
-#  define BX_TICK1_IF_SINGLE_PROCESSOR() \
-              if (BX_SMP_PROCESSORS == 1) BX_TICK1()
-#  define BX_TICKN_IF_SINGLE_PROCESSOR(n) \
-              if (BX_SMP_PROCESSORS == 1) BX_TICKN(n)
-#else
-#  define BX_TICK1_IF_SINGLE_PROCESSOR()  BX_TICK1()
-#  define BX_TICKN_IF_SINGLE_PROCESSOR(n) BX_TICKN(n)
 #endif
 
 // you can't use static member functions on the CPU, if there are going
@@ -272,7 +258,6 @@ public:
   void info(const char *fmt, ...)   BX_CPP_AttrPrintf(2, 3);
   void error(const char *fmt, ...)  BX_CPP_AttrPrintf(2, 3);
   void panic(const char *fmt, ...)  BX_CPP_AttrPrintf(2, 3);
-  void pass(const char *fmt, ...)   BX_CPP_AttrPrintf(2, 3);
   void ldebug(const char *fmt, ...) BX_CPP_AttrPrintf(2, 3);
   void fatal (const char *prefix, const char *fmt, va_list ap, int exit_status);
   void ask (int level, const char *prefix, const char *fmt, va_list ap);
@@ -351,7 +336,6 @@ typedef class BOCHSAPI iofunctions iofunc_t;
 #define BX_DEBUG(x)
 #define BX_ERROR(x)
 #define BX_PANIC(x) (LOG_THIS panic) x
-#define BX_PASS(x) (LOG_THIS pass) x
 
 #define BX_ASSERT(x)
 
@@ -361,7 +345,6 @@ typedef class BOCHSAPI iofunctions iofunc_t;
 #define BX_DEBUG(x) (LOG_THIS ldebug) x
 #define BX_ERROR(x) (LOG_THIS error) x
 #define BX_PANIC(x) (LOG_THIS panic) x
-#define BX_PASS(x) (LOG_THIS pass) x
 
 #if BX_ASSERT_ENABLE
   #define BX_ASSERT(x) do {if (!(x)) BX_PANIC(("failed assertion \"%s\" at %s:%d\n", #x, __FILE__, __LINE__));} while (0)
@@ -431,12 +414,14 @@ typedef struct {
   void* record_io;
 } bx_debug_t;
 
-void CDECL bx_signal_handler(int signum);
+BOCHSAPI_MSVCONLY void CDECL bx_signal_handler(int signum);
 int bx_atexit(void);
 BOCHSAPI extern bx_debug_t bx_dbg;
 
+#if BX_SUPPORT_APIC
 // determinted by XAPIC option
 BOCHSAPI extern Bit32u apic_id_mask;
+#endif
 
 // memory access type (read/write/execute/rw)
 #define BX_READ         0
@@ -471,7 +456,6 @@ BOCHSAPI extern Bit32u apic_id_mask;
 
 #include "memory/memory.h"
 #include "pc_system.h"
-#include "plugin.h"
 #include "gui/gui.h"
 
 /* --- EXTERNS --- */
@@ -497,6 +481,7 @@ extern bx_bool bx_gui_sighandler;
 #define BX_N_PARALLEL_PORTS 2
 #define BX_N_USB_UHCI_PORTS 2
 #define BX_N_USB_OHCI_PORTS 2
+#define BX_N_USB_XHCI_PORTS 4
 #define BX_N_USB_HUB_PORTS 8
 #define BX_N_PCI_SLOTS 5
 #define BX_N_USER_PLUGINS 8
@@ -505,13 +490,38 @@ void bx_center_print(FILE *file, const char *line, unsigned maxwidth);
 
 #include "instrument.h"
 
+BX_CPP_INLINE Bit16u bx_bswap16(Bit16u val16)
+{
+  return (val16<<8) | (val16>>8);
+}
+
+#if BX_HAVE___BUILTIN_BSWAP32
+#define bx_bswap32 __builtin_bswap32
+#else
+BX_CPP_INLINE Bit32u bx_bswap32(Bit32u val32)
+{
+  val32 = ((val32<<8) & 0xFF00FF00) | ((val32>>8) & 0x00FF00FF);
+  return (val32<<16) | (val32>>16);
+}
+#endif
+
+#if BX_HAVE___BUILTIN_BSWAP64
+#define bx_bswap64 __builtin_bswap64
+#else
+BX_CPP_INLINE Bit64u bx_bswap64(Bit64u val64)
+{
+  Bit32u lo = bx_bswap32((Bit32u)(val64 >> 32));
+  Bit32u hi = bx_bswap32((Bit32u)(val64 & 0xFFFFFFFF));
+  return ((Bit64u)hi << 32) | (Bit64u)lo;
+}
+#endif
+
 // These are some convenience macros which abstract out accesses between
 // a variable in native byte ordering to/from guest (x86) memory, which is
 // always in little endian format.  You must deal with alignment (if your
 // system cares) and endian rearranging.  Don't assume anything.  You could
 // put some platform specific asm() statements here, to make use of native
 // instructions to help perform these operations more efficiently than C++.
-
 
 #ifdef BX_LITTLE_ENDIAN
 
@@ -529,100 +539,35 @@ void bx_center_print(FILE *file, const char *line, unsigned maxwidth);
 #define ReadHostQWordFromLittleEndian(hostPtr, nativeVar64) \
     (nativeVar64) = *((Bit64u*)(hostPtr))
 
+#else
+
+#define WriteHostWordToLittleEndian(hostPtr,  nativeVar16) {  \
+    *(Bit16u *)(hostPtr) = bx_bswap16((Bit16u)(nativeVar16)); \
+}
+#define WriteHostDWordToLittleEndian(hostPtr, nativeVar32) {  \
+    *(Bit32u *)(hostPtr) = bx_bswap32((Bit32u)(nativeVar32)); \
+}
+#define WriteHostQWordToLittleEndian(hostPtr, nativeVar64) {  \
+    *(Bit64u *)(hostPtr) = bx_bswap64((Bit64u)(nativeVar64)); \
+}
+
+#define ReadHostWordFromLittleEndian(hostPtr, nativeVar16) {  \
+    (nativeVar16) =  bx_bswap16(*(Bit16u *)(hostPtr));        \
+}
+#define ReadHostDWordFromLittleEndian(hostPtr, nativeVar32) { \
+    (nativeVar32) =  bx_bswap32(*(Bit32u *)(hostPtr));        \
+}
+#define ReadHostQWordFromLittleEndian(hostPtr, nativeVar64) { \
+    (nativeVar64) =  bx_bswap64(*(Bit64u *)(hostPtr));        \
+}
+
+#endif
+
 #define CopyHostWordLittleEndian(hostAddrDst,  hostAddrSrc)  \
     (* (Bit16u *)(hostAddrDst)) = (* (Bit16u *)(hostAddrSrc));
 #define CopyHostDWordLittleEndian(hostAddrDst,  hostAddrSrc) \
     (* (Bit32u *)(hostAddrDst)) = (* (Bit32u *)(hostAddrSrc));
 #define CopyHostQWordLittleEndian(hostAddrDst,  hostAddrSrc) \
     (* (Bit64u *)(hostAddrDst)) = (* (Bit64u *)(hostAddrSrc));
-
-#else
-
-#define WriteHostWordToLittleEndian(hostPtr,  nativeVar16) { \
-    ((Bit8u *)(hostPtr))[0] = (Bit8u)  (nativeVar16);        \
-    ((Bit8u *)(hostPtr))[1] = (Bit8u) ((nativeVar16)>>8);    \
-}
-#define WriteHostDWordToLittleEndian(hostPtr, nativeVar32) { \
-    ((Bit8u *)(hostPtr))[0] = (Bit8u)  (nativeVar32);        \
-    ((Bit8u *)(hostPtr))[1] = (Bit8u) ((nativeVar32)>>8);    \
-    ((Bit8u *)(hostPtr))[2] = (Bit8u) ((nativeVar32)>>16);   \
-    ((Bit8u *)(hostPtr))[3] = (Bit8u) ((nativeVar32)>>24);   \
-}
-#define WriteHostQWordToLittleEndian(hostPtr, nativeVar64) { \
-    ((Bit8u *)(hostPtr))[0] = (Bit8u)  (nativeVar64);        \
-    ((Bit8u *)(hostPtr))[1] = (Bit8u) ((nativeVar64)>>8);    \
-    ((Bit8u *)(hostPtr))[2] = (Bit8u) ((nativeVar64)>>16);   \
-    ((Bit8u *)(hostPtr))[3] = (Bit8u) ((nativeVar64)>>24);   \
-    ((Bit8u *)(hostPtr))[4] = (Bit8u) ((nativeVar64)>>32);   \
-    ((Bit8u *)(hostPtr))[5] = (Bit8u) ((nativeVar64)>>40);   \
-    ((Bit8u *)(hostPtr))[6] = (Bit8u) ((nativeVar64)>>48);   \
-    ((Bit8u *)(hostPtr))[7] = (Bit8u) ((nativeVar64)>>56);   \
-}
-
-#define ReadHostWordFromLittleEndian(hostPtr, nativeVar16) {   \
-    (nativeVar16) =  ((Bit16u) ((Bit8u *)(hostPtr))[0]) |      \
-                    (((Bit16u) ((Bit8u *)(hostPtr))[1])<<8) ;  \
-}
-#define ReadHostDWordFromLittleEndian(hostPtr, nativeVar32) {  \
-    (nativeVar32) =  ((Bit32u) ((Bit8u *)(hostPtr))[0]) |      \
-                    (((Bit32u) ((Bit8u *)(hostPtr))[1])<<8) |  \
-                    (((Bit32u) ((Bit8u *)(hostPtr))[2])<<16) | \
-                    (((Bit32u) ((Bit8u *)(hostPtr))[3])<<24);  \
-}
-#define ReadHostQWordFromLittleEndian(hostPtr, nativeVar64) {  \
-    (nativeVar64) =  ((Bit64u) ((Bit8u *)(hostPtr))[0]) |      \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[1])<<8) |  \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[2])<<16) | \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[3])<<24) | \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[4])<<32) | \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[5])<<40) | \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[6])<<48) | \
-                    (((Bit64u) ((Bit8u *)(hostPtr))[7])<<56);  \
-}
-
-#define CopyHostWordLittleEndian(hostAddrDst, hostAddrSrc) {   \
-    ((Bit8u *)(hostAddrDst))[0] = ((Bit8u *)(hostAddrSrc))[0]; \
-    ((Bit8u *)(hostAddrDst))[1] = ((Bit8u *)(hostAddrSrc))[1]; \
-}
-#define CopyHostDWordLittleEndian(hostAddrDst, hostAddrSrc) {  \
-    ((Bit8u *)(hostAddrDst))[0] = ((Bit8u *)(hostAddrSrc))[0]; \
-    ((Bit8u *)(hostAddrDst))[1] = ((Bit8u *)(hostAddrSrc))[1]; \
-    ((Bit8u *)(hostAddrDst))[2] = ((Bit8u *)(hostAddrSrc))[2]; \
-    ((Bit8u *)(hostAddrDst))[3] = ((Bit8u *)(hostAddrSrc))[3]; \
-}
-#define CopyHostQWordLittleEndian(hostAddrDst, hostAddrSrc) {  \
-    ((Bit8u *)(hostAddrDst))[0] = ((Bit8u *)(hostAddrSrc))[0]; \
-    ((Bit8u *)(hostAddrDst))[1] = ((Bit8u *)(hostAddrSrc))[1]; \
-    ((Bit8u *)(hostAddrDst))[2] = ((Bit8u *)(hostAddrSrc))[2]; \
-    ((Bit8u *)(hostAddrDst))[3] = ((Bit8u *)(hostAddrSrc))[3]; \
-    ((Bit8u *)(hostAddrDst))[4] = ((Bit8u *)(hostAddrSrc))[4]; \
-    ((Bit8u *)(hostAddrDst))[5] = ((Bit8u *)(hostAddrSrc))[5]; \
-    ((Bit8u *)(hostAddrDst))[6] = ((Bit8u *)(hostAddrSrc))[6]; \
-    ((Bit8u *)(hostAddrDst))[7] = ((Bit8u *)(hostAddrSrc))[7]; \
-}
-
-#endif
-
-BX_CPP_INLINE Bit32u bx_bswap32(Bit32u val32)
-{
-  Bit32u b0 = val32 & 0xff; val32 >>= 8;
-  Bit32u b1 = val32 & 0xff; val32 >>= 8;
-  Bit32u b2 = val32 & 0xff; val32 >>= 8;
-  Bit32u b3 = val32;
-  return (b0<<24) | (b1<<16) | (b2<<8) | b3;
-}
-
-BX_CPP_INLINE Bit64u bx_bswap64(Bit64u val64)
-{
-  Bit64u b0 = val64 & 0xff; val64 >>= 8;
-  Bit64u b1 = val64 & 0xff; val64 >>= 8;
-  Bit64u b2 = val64 & 0xff; val64 >>= 8;
-  Bit64u b3 = val64 & 0xff; val64 >>= 8;
-  Bit64u b4 = val64 & 0xff; val64 >>= 8;
-  Bit64u b5 = val64 & 0xff; val64 >>= 8;
-  Bit64u b6 = val64 & 0xff; val64 >>= 8;
-  Bit64u b7 = val64;
-  return (b0<<56) | (b1<<48) | (b2<<40) | (b3<<32) | (b4<<24) | (b5<<16) | (b6<<8) | b7;
-}
 
 #endif  /* BX_BOCHS_H */

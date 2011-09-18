@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2009  The Bochs Project
+//  Copyright (C) 2002-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -26,6 +26,7 @@
 
 #include "param_names.h"
 #include "iodev.h"
+#include "virt_timer.h"
 
 bx_simulator_interface_c *SIM = NULL;
 logfunctions *siminterface_log = NULL;
@@ -45,6 +46,12 @@ bx_list_c *root_param = NULL;
 // bx_keyboard.s.internal_buffer[4] (or whatever) directly. -Bryce
 //
 
+typedef struct _rt_conf_entry_t {
+  void *device;
+  rt_conf_handler_t handler;
+  struct _rt_conf_entry_t *next;
+} rt_conf_entry_t;
+
 typedef struct _user_option_t {
   const char *name;
   user_option_parser_t parser;
@@ -58,6 +65,7 @@ class bx_real_sim_c : public bx_simulator_interface_c {
   const char *registered_ci_name;
   config_interface_callback_t ci_callback;
   void *ci_callback_data;
+  rt_conf_entry_t *rt_conf_entries;
   user_option_t *user_options;
   int init_done;
   int enabled;
@@ -148,6 +156,8 @@ public:
     void *userdata);
   virtual int configuration_interface(const char* name, ci_command_t command);
   virtual int begin_simulation(int argc, char *argv[]);
+  virtual bx_bool register_runtime_config_handler(void *dev, rt_conf_handler_t handler);
+  virtual void update_runtime_options();
   virtual void set_sim_thread_func(is_sim_thread_func_t func) {}
   virtual bx_bool is_sim_thread();
   virtual void set_debug_gui(bx_bool val) { wx_debug_gui = val; }
@@ -317,6 +327,7 @@ bx_real_sim_c::bx_real_sim_c()
   quit_context = NULL;
   exit_code = 0;
   param_id = BXP_NEW_PARAM_ID;
+  rt_conf_entries = NULL;
   user_options = NULL;
 }
 
@@ -480,17 +491,13 @@ const char *hdimage_mode_names[] = {
   "undoable",
   "growing",
   "volatile",
-  "z-undoable",
-  "z-volatile",
   "vvfat",
   NULL
 };
 
 int bx_real_sim_c::hdimage_get_mode(const char *mode)
 {
-  Bit8u i;
-
-  for (i = 0; i <= BX_HDIMAGE_MODE_LAST; i++) {
+  for (int i = 0; i <= BX_HDIMAGE_MODE_LAST; i++) {
     if (!strcmp(mode, hdimage_mode_names[i])) return i;
   }
   return -1;
@@ -563,9 +570,8 @@ int bx_real_sim_c::ask_param(const char *pname)
 int bx_real_sim_c::ask_filename(const char *filename, int maxlen, const char *prompt, const char *the_default, int flags)
 {
   BxEvent event;
-  bx_param_string_c param(NULL, "filename", prompt, "", the_default, maxlen);
-  flags |= param.IS_FILENAME;
-  param.set_options(flags);
+  bx_param_filename_c param(NULL, "filename", prompt, "", the_default, maxlen);
+  param.set_options(param.get_options() | flags);
   event.type = BX_SYNC_EVT_ASK_PARAM;
   event.u.param.param = &param;
   sim_to_ci_event(&event);
@@ -788,6 +794,45 @@ int bx_real_sim_c::configuration_interface(const char *ignore, ci_command_t comm
 int bx_real_sim_c::begin_simulation(int argc, char *argv[])
 {
   return bx_begin_simulation(argc, argv);
+}
+
+bx_bool bx_real_sim_c::register_runtime_config_handler(void *dev, rt_conf_handler_t handler)
+{
+  rt_conf_entry_t *rt_conf_entry;
+
+  rt_conf_entry = (rt_conf_entry_t *)malloc(sizeof(rt_conf_entry_t));
+  if (rt_conf_entry == NULL) {
+    BX_PANIC(("can't allocate rt_conf_entry_t"));
+    return 0;
+  }
+
+  rt_conf_entry->device = dev;
+  rt_conf_entry->handler = handler;
+  rt_conf_entry->next = NULL;
+
+  if (rt_conf_entries == NULL) {
+    rt_conf_entries = rt_conf_entry;
+  } else {
+    rt_conf_entry_t *temp = rt_conf_entries;
+
+    while (temp->next) {
+      temp = temp->next;
+    }
+    temp->next = rt_conf_entry;
+  }
+  return 1;
+}
+
+void bx_real_sim_c::update_runtime_options()
+{
+  rt_conf_entry_t *temp = rt_conf_entries;
+
+  while (temp != NULL) {
+    temp->handler(temp->device);
+    temp = temp->next;
+  }
+  bx_gui->update_drive_status_buttons();
+  bx_virt_timer.set_realtime_delay();
 }
 
 bx_bool bx_real_sim_c::is_sim_thread()
@@ -1014,9 +1059,6 @@ bx_bool bx_real_sim_c::restore_logopts()
               type = LOGLEV_ERROR;
             } else if (!strncmp(string, "PANIC=", 6)) {
               type = LOGLEV_PANIC;
-            } else if (!strncmp(string, "PASS=", 5)) {
-              type = LOGLEV_PASS;
-              j = 5;
             }
             if (!strcmp(string+j, "ignore")) {
               action = ACT_IGNORE;
@@ -1130,6 +1172,26 @@ bx_bool bx_real_sim_c::restore_bochs_param(bx_list_c *root, const char *sr_path,
                     fclose(fp2);
                   }
                   break;
+                case BXT_PARAM_FILEDATA:
+                  sprintf(devdata, "%s/%s", sr_path, ptr);
+                  fp2 = fopen(devdata, "rb");
+                  if (fp2 != NULL) {
+                    FILE **fpp = ((bx_shadow_filedata_c*)param)->get_fpp();
+                    // If the temporary backing store file wasn't created, do it now.
+                    if (*fpp == NULL)
+                      *fpp = tmpfile();
+                    if (*fpp != NULL) {
+                      while (!feof(fp2)) {
+                        char buffer[64];
+                        size_t chars = fread(buffer, 1, sizeof(buffer), fp2);
+                        fwrite(buffer, 1, chars, *fpp);
+                      }
+                      fflush(*fpp);
+                    }
+                    ((bx_shadow_filedata_c*)param)->restore(fp2);
+                    fclose(fp2);
+                  }
+                  break;
                 case BXT_LIST:
                   base = (bx_list_c*)param;
                   break;
@@ -1235,6 +1297,28 @@ bx_bool bx_real_sim_c::save_sr_param(FILE *fp, bx_param_c *node, const char *sr_
       fp2 = fopen(tmpstr, "wb");
       if (fp2 != NULL) {
         fwrite(((bx_shadow_data_c*)node)->getptr(), 1, ((bx_shadow_data_c*)node)->get_size(), fp2);
+        fclose(fp2);
+      }
+      break;
+    case BXT_PARAM_FILEDATA:
+      fprintf(fp, "%s.%s\n", node->get_parent()->get_name(), node->get_name());
+      if (sr_path)
+        sprintf(tmpstr, "%s/%s.%s", sr_path, node->get_parent()->get_name(), node->get_name());
+      else
+        sprintf(tmpstr, "%s.%s", node->get_parent()->get_name(), node->get_name());
+      fp2 = fopen(tmpstr, "wb");
+      if (fp2 != NULL) {
+        FILE **fpp = ((bx_shadow_filedata_c*)node)->get_fpp();
+        // If the backing store hasn't been created, just save an empty 0 byte placeholder file.
+        if (*fpp != NULL) {
+          while (!feof(*fpp)) {
+            char buffer[64];
+            size_t chars = fread (buffer, 1, sizeof(buffer), *fpp);
+            fwrite(buffer, 1, chars, fp2);
+          }
+          fflush(*fpp);
+        }
+        ((bx_shadow_filedata_c*)node)->save(fp2);
         fclose(fp2);
       }
       break;

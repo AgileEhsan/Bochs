@@ -39,7 +39,6 @@
 
 typedef struct {
 
-  Bit32u	base_ioaddr;
   Bit8u		macaddr[6];
   Bit8u		irqEnabled;
 
@@ -55,7 +54,6 @@ typedef struct {
   Bit16u	recvRingLength[PNIC_RECV_RINGS];
 
   Bit8u devfunc;
-  Bit8u pci_conf[256];
 
 } bx_pnic_t;
 

@@ -26,20 +26,13 @@
 #include "cpu.h"
 #define LOG_THIS BX_CPU_THIS_PTR
 
-// Make code more tidy with a few macros.
-#if BX_SUPPORT_X86_64==0
-#define RIP EIP
-#endif
-
 bxPageWriteStampTable pageWriteStampTable;
 
 void flushICaches(void)
 {
   for (unsigned i=0; i<BX_SMP_PROCESSORS; i++) {
     BX_CPU(i)->iCache.flushICacheEntries();
-#if BX_SUPPORT_TRACE_CACHE
     BX_CPU(i)->async_event |= BX_ASYNC_EVENT_STOP_TRACE;
-#endif
   }
 
   pageWriteStampTable.resetWriteStamps();
@@ -48,17 +41,36 @@ void flushICaches(void)
 void handleSMC(bx_phy_address pAddr, Bit32u mask)
 {
   for (unsigned i=0; i<BX_SMP_PROCESSORS; i++) {
-#if BX_SUPPORT_TRACE_CACHE
     BX_CPU(i)->async_event |= BX_ASYNC_EVENT_STOP_TRACE;
-#endif
     BX_CPU(i)->iCache.handleSMC(pAddr, mask);
   }
 }
 
-#if BX_SUPPORT_TRACE_CACHE
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
 
-void BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_address pAddr)
+BX_INSF_TYPE BX_CPU_C::BxEndTrace(bxInstruction_c *i)
 {
+  // do nothing, return to main cpu_loop
+}
+
+void genDummyICacheEntry(bxInstruction_c *i, BxExecutePtr_tR execute)
+{
+  i->setILen(0);
+  i->setIaOpcode(BX_INSERTED_OPCODE);
+  i->execute = execute;
+}
+
+#endif
+
+bxICacheEntry_c* BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_address pAddr)
+{
+  bxICacheEntry_c *vc_hit = BX_CPU_THIS_PTR iCache.lookup_victim_cache(pAddr, BX_CPU_THIS_PTR fetchModeMask);
+  if (vc_hit) {
+    return vc_hit;
+  }
+
+  BX_CPU_THIS_PTR iCache.victim_entry(entry, BX_CPU_THIS_PTR fetchModeMask);
+
   BX_CPU_THIS_PTR iCache.alloc_trace(entry);
 
   // Cache miss. We weren't so lucky, but let's be optimistic - try to build 
@@ -103,16 +115,27 @@ void BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_
       entry->traceMask = 0x80000000; /* last line in page */
       pageWriteStampTable.markICacheMask(entry->pAddr, entry->traceMask);
       pageWriteStampTable.markICacheMask(BX_CPU_THIS_PTR pAddrPage, 0x1);
+
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+      entry->tlen++; /* Add the inserted end of trace opcode */
+      genDummyICacheEntry(++i, &BX_CPU_C::BxEndTrace);
+#endif
+
       BX_CPU_THIS_PTR iCache.commit_page_split_trace(BX_CPU_THIS_PTR pAddrPage, entry);
-      return;
+      return entry;
     }
 
     // add instruction to the trace
     unsigned iLen = i->ilen();
     entry->tlen++;
 
-    BX_INSTR_OPCODE(BX_CPU_ID, fetchPtr, iLen,
+#ifdef BX_INSTR_STORE_OPCODE_BYTES
+    i->set_opcode_bytes(fetchPtr);
+#endif
+    BX_INSTR_OPCODE(BX_CPU_ID, i, fetchPtr, iLen,
        BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, long64_mode());
+
+    i++;
 
     traceMask |= 1 <<  (pageOffset >> 7);
     traceMask |= 1 << ((pageOffset + iLen - 1) >> 7);
@@ -123,11 +146,16 @@ void BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_
     pAddr += iLen;
     pageOffset += iLen;
     fetchPtr += iLen;
-    i++;
 
     // try to find a trace starting from current pAddr and merge
-    if (remainingInPage >= 15) // avoid merging with page split trace
-      if (mergeTraces(entry, i, pAddr)) break;
+    if (remainingInPage >= 15) { // avoid merging with page split trace
+      if (mergeTraces(entry, i, pAddr)) {
+          entry->traceMask |= traceMask;
+          pageWriteStampTable.markICacheMask(pAddr, entry->traceMask);
+          BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
+          return entry;
+      }
+    }
   }
 
 //BX_INFO(("commit trace %08x len=%d mask %08x", (Bit32u) entry->pAddr, entry->tlen, pageWriteStampTable.getFineGranularityMapping(entry->pAddr)));
@@ -136,7 +164,14 @@ void BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_
 
   pageWriteStampTable.markICacheMask(pAddr, entry->traceMask);
 
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+  entry->tlen++; /* Add the inserted end of trace opcode */
+  genDummyICacheEntry(i, &BX_CPU_C::BxEndTrace);
+#endif
+
   BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
+
+  return entry;
 }
 
 bx_bool BX_CPU_C::mergeTraces(bxICacheEntry_c *entry, bxInstruction_c *i, bx_phy_address pAddr)
@@ -147,9 +182,15 @@ bx_bool BX_CPU_C::mergeTraces(bxICacheEntry_c *entry, bxInstruction_c *i, bx_phy
   {
     // determine max amount of instruction to take from another entry
     unsigned max_length = e->tlen;
+
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+    if (max_length + entry->tlen > BX_MAX_TRACE_LENGTH)
+        return 0;
+#else
     if (max_length + entry->tlen > BX_MAX_TRACE_LENGTH)
         max_length = BX_MAX_TRACE_LENGTH - entry->tlen;
     if(max_length == 0) return 0;
+#endif
 
     memcpy(i, e->i, sizeof(bxInstruction_c)*max_length);
     entry->tlen += max_length;
@@ -162,49 +203,6 @@ bx_bool BX_CPU_C::mergeTraces(bxICacheEntry_c *entry, bxInstruction_c *i, bx_phy
 
   return 0;
 }
-
-#else // BX_SUPPORT_TRACE_CACHE == 0
-
-bx_bool BX_CPU_C::fetchInstruction(bxInstruction_c *iStorage, Bit32u eipBiased)
-{
-  unsigned remainingInPage = BX_CPU_THIS_PTR eipPageWindowSize - eipBiased;
-  const Bit8u *fetchPtr = BX_CPU_THIS_PTR eipFetchPtr + eipBiased;
-  int ret;
-
-#if BX_SUPPORT_X86_64
-  if (BX_CPU_THIS_PTR cpu_mode == BX_MODE_LONG_64)
-    ret = fetchDecode64(fetchPtr, iStorage, remainingInPage);
-  else
-#endif
-    ret = fetchDecode32(fetchPtr, iStorage, remainingInPage);
-
-  if (ret < 0) {
-    // handle instrumentation callback inside boundaryFetch
-    boundaryFetch(fetchPtr, remainingInPage, iStorage);
-    return 0;
-  }
-
-#if BX_INSTRUMENTATION
-  BX_INSTR_OPCODE(BX_CPU_ID, fetchPtr, iStorage->ilen(),
-       BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, long64_mode());
-#endif
-
-  return 1;
-}
-
-void BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_address pAddr)
-{
-  // The entry will be marked valid if fetchdecode will succeed
-  if (fetchInstruction(entry->i, eipBiased)) {
-    entry->pAddr = pAddr;
-    pageWriteStampTable.markICache(pAddr, entry->i->ilen());
-  }
-  else {
-    entry->pAddr = BX_ICACHE_INVALID_PHY_ADDRESS;
-  }
-}
-
-#endif
 
 void BX_CPU_C::boundaryFetch(const Bit8u *fetchPtr, unsigned remainingInPage, bxInstruction_c *i)
 {
@@ -264,6 +262,10 @@ void BX_CPU_C::boundaryFetch(const Bit8u *fetchPtr, unsigned remainingInPage, bx
   // think about repeated instructions, etc.
   // invalidate_prefetch_q();
 
-  BX_INSTR_OPCODE(BX_CPU_ID, fetchBuffer, i->ilen(),
+#ifdef BX_INSTR_STORE_OPCODE_BYTES
+  i->set_opcode_bytes(fetchBuffer);
+#endif
+
+  BX_INSTR_OPCODE(BX_CPU_ID, i, fetchBuffer, i->ilen(),
       BX_CPU_THIS_PTR sregs[BX_SEG_REG_CS].cache.u.segment.d_b, long64_mode());
 }

@@ -66,13 +66,11 @@ bx_devices_c::~bx_devices_c()
 
 void bx_devices_c::init_stubs()
 {
-#if BX_SUPPORT_PCI
   pluginPciBridge = &stubPci;
   pluginPci2IsaBridge = &stubPci2Isa;
   pluginPciIdeController = &stubPciIde;
-#if BX_SUPPORT_ACPI
+#if BX_SUPPORT_PCI
   pluginACPIController = &stubACPIController;
-#endif
 #endif
   pluginKeyboard = &stubKeyboard;
   pluginDmaDevice = &stubDma;
@@ -89,14 +87,17 @@ void bx_devices_c::init_stubs()
 #if BX_SUPPORT_APIC
   pluginIOAPIC = &stubIOAPIC;
 #endif
+#if BX_SUPPORT_GAMEPORT
+  pluginGameport = &stubGameport;
+#endif
 #if BX_SUPPORT_PCIUSB
   pluginUsbDevCtl = &stubUsbDevCtl;
 #endif
 #if BX_SUPPORT_SOUNDLOW
   pluginSoundModCtl = &stubSoundModCtl;
 #endif
-#if 0
-  g2h = NULL;
+#if BX_NETWORKING
+  pluginNetModCtl = &stubNetModCtl;
 #endif
 }
 
@@ -104,6 +105,7 @@ void bx_devices_c::init(BX_MEM_C *newmem)
 {
   unsigned i;
   const char def_name[] = "Default";
+  const char *vga_ext;
   bx_list_c *plugin_ctrl;
   bx_param_bool_c *plugin;
 #if !BX_PLUGINS
@@ -174,6 +176,9 @@ void bx_devices_c::init(BX_MEM_C *newmem)
 #if BX_SUPPORT_SOUNDLOW
   PLUG_load_plugin(soundmod, PLUGTYPE_CORE);
 #endif
+#if BX_NETWORKING
+  PLUG_load_plugin(netmod, PLUGTYPE_CORE);
+#endif
 
   // PCI logic (i440FX)
   if (SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get()) {
@@ -229,8 +234,6 @@ void bx_devices_c::init(BX_MEM_C *newmem)
       else if (!strcmp(plugname, BX_PLUGIN_PCI_IDE)) {
         PLUG_load_plugin(pci_ide, PLUGTYPE_OPTIONAL);
       }
-#endif
-#if BX_SUPPORT_ACPI
       else if (!strcmp(plugname, BX_PLUGIN_ACPI)) {
         PLUG_load_plugin(acpi, PLUGTYPE_OPTIONAL);
       }
@@ -259,8 +262,9 @@ void bx_devices_c::init(BX_MEM_C *newmem)
 
 #if BX_SUPPORT_PCI
   if (SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get()) {
+    vga_ext = SIM->get_param_string(BXPN_VGA_EXTENSION)->getptr();
     if ((DEV_is_pci_device("pcivga")) &&
-        (!strcmp(SIM->get_param_string(BXPN_VGA_EXTENSION)->getptr(), "vbe"))) {
+        ((!strlen(vga_ext)) || (!strcmp(vga_ext, "none")) || (!strcmp(vga_ext, "vbe")))) {
       PLUG_load_plugin(pcivga, PLUGTYPE_OPTIONAL);
     }
 #if BX_SUPPORT_USB_UHCI
@@ -273,15 +277,20 @@ void bx_devices_c::init(BX_MEM_C *newmem)
       PLUG_load_plugin(usb_ohci, PLUGTYPE_OPTIONAL);
     }
 #endif
+#if BX_SUPPORT_USB_XHCI
+    if (is_usb_xhci_enabled()) {
+      PLUG_load_plugin(usb_xhci, PLUGTYPE_OPTIONAL);
+    }
+#endif
 #if BX_SUPPORT_PCIDEV
     if (SIM->get_param_num(BXPN_PCIDEV_VENDOR)->get() != 0xffff) {
       PLUG_load_plugin(pcidev, PLUGTYPE_OPTIONAL);
     }
 #endif
 #if BX_SUPPORT_PCIPNIC
-  if (SIM->get_param_bool(BXPN_PNIC_ENABLED)->get()) {
-    PLUG_load_plugin(pcipnic, PLUGTYPE_OPTIONAL);
-  }
+    if (SIM->get_param_bool(BXPN_PNIC_ENABLED)->get()) {
+      PLUG_load_plugin(pcipnic, PLUGTYPE_OPTIONAL);
+    }
 #endif
   }
 #endif
@@ -334,13 +343,6 @@ void bx_devices_c::init(BX_MEM_C *newmem)
   /*--- 82C54 PIT ---*/
   pluginPitDevice->init();
 
-#if 0
-  // Guest to Host interface.  Used with special guest drivers
-  // which move data to/from the host environment.
-  g2h = &bx_g2h;
-  g2h->init();
-#endif
-
   // system hardware
   register_io_read_handler(this, &read_handler, 0x0092,
                            "Port 92h System Control", 1);
@@ -348,8 +350,8 @@ void bx_devices_c::init(BX_MEM_C *newmem)
                             "Port 92h System Control", 1);
 
   // misc. CMOS
-  Bit32u memory_in_k = (Bit32u)mem->get_memory_len() / 1024;
-  Bit32u extended_memory_in_k = memory_in_k > 1024 ? (memory_in_k - 1024) : 0;
+  Bit64u memory_in_k = mem->get_memory_len() / 1024;
+  Bit64u extended_memory_in_k = memory_in_k > 1024 ? (memory_in_k - 1024) : 0;
   if (extended_memory_in_k > 0xfc00) extended_memory_in_k = 0xfc00;
 
   DEV_cmos_set_reg(0x15, (Bit8u) BASE_MEMORY_IN_K);
@@ -359,11 +361,20 @@ void bx_devices_c::init(BX_MEM_C *newmem)
   DEV_cmos_set_reg(0x30, (Bit8u) (extended_memory_in_k & 0xff));
   DEV_cmos_set_reg(0x31, (Bit8u) ((extended_memory_in_k >> 8) & 0xff));
 
-  Bit32u extended_memory_in_64k = memory_in_k > 16384 ? (memory_in_k - 16384) / 64 : 0;
-  if (extended_memory_in_64k > 0xffff) extended_memory_in_64k = 0xffff;
+  Bit64u extended_memory_in_64k = memory_in_k > 16384 ? (memory_in_k - 16384) / 64 : 0;
+  // Limit to 3 GB - 16 MB. PCI Memory Address Space starts at 3 GB.
+  if (extended_memory_in_64k > 0xbf00) extended_memory_in_64k = 0xbf00;
 
   DEV_cmos_set_reg(0x34, (Bit8u) (extended_memory_in_64k & 0xff));
   DEV_cmos_set_reg(0x35, (Bit8u) ((extended_memory_in_64k >> 8) & 0xff));
+
+  Bit64u memory_above_4gb = (mem->get_memory_len() > BX_CONST64(0x100000000)) ?
+                            (mem->get_memory_len() - BX_CONST64(0x100000000)) : 0;
+  if (memory_above_4gb) {
+    DEV_cmos_set_reg(0x5b, (Bit8u)(memory_above_4gb >> 16));
+    DEV_cmos_set_reg(0x5c, (Bit8u)(memory_above_4gb >> 24));
+    DEV_cmos_set_reg(0x5d, memory_above_4gb >> 32);
+  }
 
   if (timer_handle != BX_NULL_TIMER_HANDLE) {
     timer_handle = bx_pc_system.register_timer(this, timer_handler,
@@ -422,6 +433,7 @@ void bx_devices_c::register_state()
 void bx_devices_c::after_restore_state()
 {
   bx_slowdown_timer.after_restore_state();
+  bx_virt_timer.set_realtime_delay();
 #if BX_SUPPORT_PCI
   if (SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get()) {
     pluginPciBridge->after_restore_state();
@@ -1075,6 +1087,14 @@ bx_bool bx_devices_c::is_usb_uhci_enabled(void)
   return 0;
 }
 
+bx_bool bx_devices_c::is_usb_xhci_enabled(void)
+{
+  if (SIM->get_param_bool(BXPN_XHCI_ENABLED)->get()) {
+    return 1;
+  }
+  return 0;
+}
+
 // removable keyboard/mouse registration
 void bx_devices_c::register_removable_keyboard(void *dev, bx_keyb_enq_t keyb_enq)
 {
@@ -1163,7 +1183,7 @@ void bx_devices_c::mouse_motion(int delta_x, int delta_y, int delta_z, unsigned 
   }
 }
 
-void bx_pci_device_stub_c::register_pci_state(bx_list_c *list, Bit8u *pci_conf)
+void bx_pci_device_stub_c::register_pci_state(bx_list_c *list)
 {
   char name[6];
 
@@ -1172,4 +1192,60 @@ void bx_pci_device_stub_c::register_pci_state(bx_list_c *list, Bit8u *pci_conf)
     sprintf(name, "0x%02x", i);
     new bx_shadow_num_c(pci, name, &pci_conf[i], BASE_HEX);
   }
+}
+
+void bx_pci_device_stub_c::load_pci_rom(const char *path)
+{
+  struct stat stat_buf;
+  int fd, ret;
+  unsigned long size, max_size;
+
+  if (*path == '\0') {
+    BX_PANIC(("PCI ROM image undefined"));
+    return;
+  }
+  // read in PCI ROM image file
+  fd = open(path, O_RDONLY
+#ifdef O_BINARY
+            | O_BINARY
+#endif
+           );
+  if (fd < 0) {
+    BX_PANIC(("couldn't open PCI ROM image file '%s'.", path));
+    return;
+  }
+  ret = fstat(fd, &stat_buf);
+  if (ret) {
+    BX_PANIC(("couldn't stat PCI ROM image file '%s'.", path));
+    return;
+  }
+
+  max_size = 0x20000;
+  size = (unsigned long)stat_buf.st_size;
+  if (size > max_size) {
+    close(fd);
+    BX_PANIC(("PCI ROM image too large"));
+    return;
+  }
+  if ((size % 512) != 0) {
+    close(fd);
+    BX_PANIC(("PCI ROM image size must be multiple of 512 (size = %ld)", size));
+    return;
+  }
+  while ((size - 1) < max_size) {
+    max_size >>= 1;
+  }
+  pci_rom_size = (max_size << 1);
+  pci_rom = new Bit8u[pci_rom_size];
+
+  while (size > 0) {
+    ret = read(fd, (bx_ptr_t) pci_rom, size);
+    if (ret <= 0) {
+      BX_PANIC(("read failed on PCI ROM image: '%s'", path));
+    }
+    size -= ret;
+  }
+  close(fd);
+
+  BX_INFO(("loaded PCI ROM '%s' (size=%u)", path, (unsigned) stat_buf.st_size));
 }

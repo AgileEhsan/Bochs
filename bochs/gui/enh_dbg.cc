@@ -732,14 +732,10 @@ void ParseBkpt()
 int FillSSE(int LineCount)
 {
 #if BX_CPU_LEVEL >= 6
-    if (! CpuSupportSSE)
-        return (LineCount);
-
     Bit64u val = 0;
     bx_param_num_c *p;
     char *cols[3];
     char ssetxt[80];
-    int i;
 
     if ((rV[CR0_Rnum] & 0xc) != 0)  // TS or EM flags in CR0 temporarily disable SSE
     {
@@ -759,7 +755,7 @@ int FillSSE(int LineCount)
     ssetxt[10] = '0';       // I'm putting a hex value in the decimal column -- more room there!
     ssetxt[11] = 'x';
     strcpy (ssetxt + 28, " : ");
-    for (i = 0; i < BX_XMM_REGISTERS; i++)
+    for (int i = 0; i < BX_XMM_REGISTERS; i++)
     {
         if (i >= 10)
         {
@@ -1127,9 +1123,6 @@ void LoadRegList()
     if (SeeReg[6] != FALSE)
         itemnum = FillDebugRegs(itemnum);
 
-//  if (SeeReg[7] != FALSE)     // Test registers are not supported yet in bochs
-//      FillTRXRegs(itemnum);
-
     RedrawColumns(REG_WND);     // resize Hex Value column sometimes
     EndListUpdate(REG_WND);
 }
@@ -1258,10 +1251,10 @@ void InitRegObjects()
         RegObject[cpu][CR0_Rnum] = SIM->get_param_num("CR0", cpu_list);
         RegObject[cpu][CR2_Rnum] = SIM->get_param_num("CR2", cpu_list);
         RegObject[cpu][CR3_Rnum] = SIM->get_param_num("CR3", cpu_list);
-#if BX_CPU_LEVEL >= 4
+#if BX_CPU_LEVEL >= 5
         RegObject[cpu][CR4_Rnum] = SIM->get_param_num("CR4", cpu_list);
 #endif
-#if BX_SUPPORT_X86_64
+#if BX_CPU_LEVEL >= 6
         RegObject[cpu][EFER_Rnum] = SIM->get_param_num("MSR.EFER", cpu_list);
 #endif
 #if BX_SUPPORT_FPU
@@ -1284,7 +1277,9 @@ void InitRegObjects()
 #endif
 
 #if BX_CPU_LEVEL >= 6
-        if (! CpuSupportSSE) {
+        CpuSupportSSE = SIM->get_param("SSE", cpu_list) != NULL;
+
+        if (CpuSupportSSE) {
             RegObject[cpu][XMM0_Rnum] = SIM->get_param_num("SSE.xmm00_0", cpu_list);
             RegObject[cpu][XMM1_Rnum] = SIM->get_param_num("SSE.xmm01_0", cpu_list);
             RegObject[cpu][XMM2_Rnum] = SIM->get_param_num("SSE.xmm02_0", cpu_list);
@@ -1313,7 +1308,7 @@ void InitRegObjects()
             RegObject[cpu][XMMF_Rnum] = SIM->get_param_num("SSE.xmm15_0", cpu_list);
             RegObject[cpu][XMM8_hi] = SIM->get_param_num("SSE.xmm08_1", cpu_list);
             RegObject[cpu][XMM9_hi] = SIM->get_param_num("SSE.xmm09_1", cpu_list);
-            RegObject[cpu][XMMA_hi] = SIM->get_param_num("SSE.xmm00_1", cpu_list);
+            RegObject[cpu][XMMA_hi] = SIM->get_param_num("SSE.xmm10_1", cpu_list);
             RegObject[cpu][XMMB_hi] = SIM->get_param_num("SSE.xmm11_1", cpu_list);
             RegObject[cpu][XMMC_hi] = SIM->get_param_num("SSE.xmm12_1", cpu_list);
             RegObject[cpu][XMMD_hi] = SIM->get_param_num("SSE.xmm13_1", cpu_list);
@@ -2096,11 +2091,6 @@ void DoAllInit()
     else
         TotCPUs = 1;
 
-    // for GUI debugger
-#if BX_CPU_LEVEL >= 6
-    CpuSupportSSE = SIM->get_param_enum(BXPN_CPUID_SSE)->get();
-#endif
-
     // divide up the pre-allocated char buffer into smaller pieces
     p = bigbuf + outbufSIZE;    // point at the end of preallocated mem
     p -= 200;           // 200 bytes is enough for all the register names
@@ -2129,7 +2119,6 @@ void DoAllInit()
     while (i > 0)
     {
         // change color when the loop goes below the base register number
-//      if (i == TRXR) --j;     // 5 TRX registers -- currently don't exist
         if (i == DR0_Rnum) --j;     // 6 Debug
         else if (i == XMM0_Rnum) --j;   // 8 or 16 XMM
         else if (i == ST0_Rnum) --j;    // 8 MMX/FPU
@@ -2203,6 +2192,7 @@ void OnBreak()
 
     // then detect current CPU mode the *right* way -- look for changes
     // TODO: create param Objects for CS.d_b and cpu_mode for each CPU
+    unsigned PrevCpuMode = CpuMode;
     CpuMode = BX_CPU(CurrentCPU)->get_cpu_mode();
     if (CpuMode == BX_MODE_LONG_64)
     {
@@ -2217,7 +2207,7 @@ void OnBreak()
     else
     {
         bx_bool d_b = BX_CPU(CurrentCPU)->sregs[BX_SEG_REG_CS].cache.u.segment.d_b;
-        if (In32Mode != d_b || In64Mode != FALSE)
+        if (In32Mode != d_b || In64Mode != FALSE || PrevCpuMode != CpuMode)
         {
             CpuModeChange = TRUE;
             In64Mode = FALSE;
@@ -2704,10 +2694,10 @@ void ChangeReg()
         Bit64u val;
         val = cvt64(tmpcb,TRUE);            // input either hex or decimal
 #if BX_SUPPORT_X86_64
-        if (i >= EAX_Rnum && i <= EBP_Rnum)     // must use RAX-RBP when setting 32b registers
+        if (i >= EAX_Rnum && i <= EBP_Rnum) // must use RAX-RBP when setting 32b registers
             i -= EAX_Rnum - RAX_Rnum;
 #endif
-        RegObject[CurrentCPU][i]->set(val);         // the set function should be a bool, not a void
+        RegObject[CurrentCPU][i]->set(val); // the set function should be a bool, not a void
 //      bx_bool worked = RegObject[CurrentCPU][i]->set(val);
 //      if (worked == FALSE)
 //          DispMessage ("Bochs does not allow you to set that register","Selection Error");

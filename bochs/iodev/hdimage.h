@@ -64,8 +64,6 @@
 #define REDOLOG_SUBTYPE_UNDOABLE "Undoable"
 #define REDOLOG_SUBTYPE_VOLATILE "Volatile"
 #define REDOLOG_SUBTYPE_GROWING  "Growing"
-// #define REDOLOG_SUBTYPE_Z_UNDOABLE "z-Undoable"
-// #define REDOLOG_SUBTYPE_Z_VOLATILE "z-Volatile"
 
 #define REDOLOG_PAGE_NOT_ALLOCATED (0xffffffff)
 
@@ -117,9 +115,9 @@
 #define htod64(val) (val)
 #define dtoh64(val) (val)
 #else
-#define htod32(val) ( (((val)&0xff000000)>>24) | (((val)&0xff0000)>>8) | (((val)&0xff00)<<8) | (((val)&0xff)<<24) )
+#define htod32(val) bx_bswap32(val)
 #define dtoh32(val) htod32(val)
-#define htod64(val) ( (((val)&0xff00000000000000LL)>>56) | (((val)&0xff000000000000LL)>>40) | (((val)&0xff0000000000LL)>>24) | (((val)&0xff00000000LL)>>8) | (((val)&0xff000000LL)<<8) | (((val)&0xff0000LL)<<24) | (((val)&0xff00LL)<<40) | (((val)&0xffLL)<<56) )
+#define htod64(val) bx_bswap64(val)
 #define dtoh64(val) htod64(val)
 #endif
 
@@ -186,7 +184,6 @@ class default_image_t : public device_image_t
 
   private:
       int fd;
-
 };
 
 // CONCAT MODE
@@ -274,7 +271,7 @@ class sparse_image_t : public device_image_t
  size_t  mmap_length;
  size_t  system_pagesize_mask;
 #endif
- Bit32u *  pagetable;
+ Bit32u *pagetable;
 
  // Header is written to disk in little-endian (x86) format
  // Thus needs to be converted on big-endian systems before read
@@ -282,14 +279,14 @@ class sparse_image_t : public device_image_t
 
  sparse_header_t header;
 
- Bit32u  pagesize;
- int     pagesize_shift;
- Bit32u  pagesize_mask;
+ Bit32u pagesize;
+ int    pagesize_shift;
+ Bit32u pagesize_mask;
 
- Bit64s  data_start;
- Bit64s  underlying_filesize;
+ Bit64s data_start;
+ Bit64s underlying_filesize;
 
- char *  pathname;
+ char *pathname;
 
  Bit64s position;
 
@@ -307,7 +304,7 @@ class sparse_image_t : public device_image_t
  void read_header();
  ssize_t read_page_fragment(Bit32u read_virtual_page, Bit32u read_page_offset, size_t read_size, void * buf);
 
- sparse_image_t *  parent_image;
+ sparse_image_t *parent_image;
 };
 
 #if EXTERNAL_DISK_SIMULATOR
@@ -338,7 +335,6 @@ class dll_image_t : public device_image_t
 
   private:
       int vunit,vblk;
-
 };
 #endif
 
@@ -471,119 +467,15 @@ class volatile_image_t : public device_image_t
 };
 
 
-#if BX_COMPRESSED_HD_SUPPORT
-
-#include <zlib.h>
-
-
-// Default compressed READ-ONLY image class
-class z_ro_image_t : public device_image_t
-{
-  public:
-      // Contructor
-      z_ro_image_t();
-
-      // Open a image. Returns non-negative if successful.
-      int open(const char* pathname);
-
-      // Close the image.
-      void close();
-
-      // Position ourselves. Return the resulting offset from the
-      // beginning of the file.
-      Bit64s lseek(Bit64s offset, int whence);
-
-      // Read count bytes to the buffer buf. Return the number of
-      // bytes read (count).
-      ssize_t read(void* buf, size_t count);
-
-      // Write count bytes from buf. Return the number of bytes
-      // written (count).
-      ssize_t write(const void* buf, size_t count);
-
-  private:
-      Bit64s offset;
-      int fd;
-      gzFile gzfile;
-
-};
-
-// Z-UNDOABLE MODE
-class z_undoable_image_t : public device_image_t
-{
-  public:
-      // Contructor
-      z_undoable_image_t(Bit64u size, const char* redolog_name);
-      virtual ~z_undoable_image_t();
-
-      // Open a image. Returns non-negative if successful.
-      int open(const char* pathname);
-
-      // Close the image.
-      void close();
-
-      // Position ourselves. Return the resulting offset from the
-      // beginning of the file.
-      Bit64s lseek(Bit64s offset, int whence);
-
-      // Read count bytes to the buffer buf. Return the number of
-      // bytes read (count).
-      ssize_t read(void* buf, size_t count);
-
-      // Write count bytes from buf. Return the number of bytes
-      // written (count).
-      ssize_t write(const void* buf, size_t count);
-
-  private:
-      redolog_t       *redolog;       // Redolog instance
-      z_ro_image_t    *ro_disk;       // Read-only compressed flat disk instance
-      Bit64u          size;
-      char            *redolog_name;  // Redolog name
-};
-
-// Z-VOLATILE MODE
-class z_volatile_image_t : public device_image_t
-{
-  public:
-      // Contructor
-      z_volatile_image_t(Bit64u size, const char* redolog_name);
-      virtual ~z_volatile_image_t();
-
-      // Open a image. Returns non-negative if successful.
-      int open(const char* pathname);
-
-      // Close the image.
-      void close();
-
-      // Position ourselves. Return the resulting offset from the
-      // beginning of the file.
-      Bit64s lseek(Bit64s offset, int whence);
-
-      // Read count bytes to the buffer buf. Return the number of
-      // bytes read (count).
-      ssize_t read(void* buf, size_t count);
-
-      // Write count bytes from buf. Return the number of bytes
-      // written (count).
-      ssize_t write(const void* buf, size_t count);
-
-  private:
-      redolog_t       *redolog;       // Redolog instance
-      z_ro_image_t    *ro_disk;       // Read-only compressed flat disk instance
-      Bit64u          size;
-      char            *redolog_name;  // Redolog name
-      char            *redolog_temp;  // Redolog temporary file name
-};
-
-#endif
-
 class bx_hdimage_ctl_c : public bx_hdimage_ctl_stub_c {
 public:
   bx_hdimage_ctl_c();
   virtual ~bx_hdimage_ctl_c() {}
   virtual device_image_t *init_image(Bit8u image_mode, Bit64u disk_size, const char *journal);
+#ifdef LOWLEVEL_CDROM
+  virtual LOWLEVEL_CDROM* init_cdrom(const char *dev);
+#endif
 };
-
 
 #endif // HDIMAGE_HEADERS_ONLY
 

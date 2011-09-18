@@ -32,7 +32,7 @@
 // a series of buttons (floppy, cdrom, snapshot, power).  Over the years, we
 // have collected many implementations of the VGAW for different environments
 // and platforms; each implementation is in a separate file under gui/*:
-// x.cc, win32.cc, beos.cc, macintosh.cc, etc.  The files gui.h and gui.cc
+// x.cc, win32.cc, macintosh.cc, etc.  The files gui.h and gui.cc
 // define the platform independent part of the VGAW, leaving about 15 methods
 // of the bx_gui_c class undefined.  The platform dependent file must
 // implement the remaining 15 methods.
@@ -123,20 +123,15 @@
 
 //////////////////////////////////////////////////////
 
-// list of possible types for bx_param_c and descendant objects
-typedef enum {
-  BXT_OBJECT = 201,
-  BXT_PARAM,
-  BXT_PARAM_NUM,
-  BXT_PARAM_BOOL,
-  BXT_PARAM_ENUM,
-  BXT_PARAM_STRING,
-  BXT_PARAM_DATA,
-  BXT_LIST
-} bx_objtype;
-
 // base value for generated new parameter id
 #define BXP_NEW_PARAM_ID 1001
+
+enum {
+#define bx_define_cpudb(model) bx_cpudb_##model,
+#include "cpudb.h"
+  bx_cpudb_model_last
+};
+#undef bx_define_cpudb
 
 #if BX_SUPPORT_SMP
   #define BX_SMP_PROCESSORS (bx_cpu_count)
@@ -148,7 +143,7 @@ typedef enum {
   BX_TOOLBAR_UNDEFINED,
   BX_TOOLBAR_FLOPPYA,
   BX_TOOLBAR_FLOPPYB,
-  BX_TOOLBAR_CDROMD,
+  BX_TOOLBAR_CDROM1,
   BX_TOOLBAR_RESET,
   BX_TOOLBAR_POWER,
   BX_TOOLBAR_SAVE_RESTORE,
@@ -166,16 +161,17 @@ typedef enum {
   LOGLEV_INFO,
   LOGLEV_ERROR,
   LOGLEV_PANIC,
-  LOGLEV_PASS,
   N_LOGLEV
 } bx_log_levels;
 
 // boot devices (using the same values as the rombios)
-#define BX_BOOT_NONE    0
-#define BX_BOOT_FLOPPYA 1
-#define BX_BOOT_DISKC   2
-#define BX_BOOT_CDROM   3
-#define BX_BOOT_NETWORK 4
+enum {
+  BX_BOOT_NONE,
+  BX_BOOT_FLOPPYA,
+  BX_BOOT_DISKC,
+  BX_BOOT_CDROM, 
+  BX_BOOT_NETWORK
+};
 
 // loader hack
 #define Load32bitOSNone        0
@@ -503,41 +499,53 @@ enum {
 #define BX_ATA_BIOSDETECT_AUTO   1
 #define BX_ATA_BIOSDETECT_CMOS   2
 
-#define BX_ATA_TRANSLATION_NONE  0
-#define BX_ATA_TRANSLATION_LBA   1
-#define BX_ATA_TRANSLATION_LARGE 2
-#define BX_ATA_TRANSLATION_RECHS 3
-#define BX_ATA_TRANSLATION_AUTO  4
-#define BX_ATA_TRANSLATION_LAST  4
+enum {
+  BX_ATA_TRANSLATION_NONE,
+  BX_ATA_TRANSLATION_LBA,
+  BX_ATA_TRANSLATION_LARGE,
+  BX_ATA_TRANSLATION_RECHS,
+  BX_ATA_TRANSLATION_AUTO
+};
+#define BX_ATA_TRANSLATION_LAST  BX_ATA_TRANSLATION_AUTO
 
-#define BX_HDIMAGE_MODE_FLAT        0
-#define BX_HDIMAGE_MODE_CONCAT      1
-#define BX_HDIMAGE_MODE_EXTDISKSIM  2
-#define BX_HDIMAGE_MODE_DLL_HD      3
-#define BX_HDIMAGE_MODE_SPARSE      4
-#define BX_HDIMAGE_MODE_VMWARE3     5
-#define BX_HDIMAGE_MODE_VMWARE4     6
-#define BX_HDIMAGE_MODE_UNDOABLE    7
-#define BX_HDIMAGE_MODE_GROWING     8
-#define BX_HDIMAGE_MODE_VOLATILE    9
-#define BX_HDIMAGE_MODE_Z_UNDOABLE 10
-#define BX_HDIMAGE_MODE_Z_VOLATILE 11
-#define BX_HDIMAGE_MODE_VVFAT      12
-#define BX_HDIMAGE_MODE_LAST       12
+enum {
+  BX_HDIMAGE_MODE_FLAT,
+  BX_HDIMAGE_MODE_CONCAT,
+  BX_HDIMAGE_MODE_EXTDISKSIM,
+  BX_HDIMAGE_MODE_DLL_HD,
+  BX_HDIMAGE_MODE_SPARSE,
+  BX_HDIMAGE_MODE_VMWARE3,
+  BX_HDIMAGE_MODE_VMWARE4,
+  BX_HDIMAGE_MODE_UNDOABLE,
+  BX_HDIMAGE_MODE_GROWING,
+  BX_HDIMAGE_MODE_VOLATILE,
+  BX_HDIMAGE_MODE_VVFAT
+};
+#define BX_HDIMAGE_MODE_LAST     BX_HDIMAGE_MODE_VVFAT
 
-#define BX_CLOCK_SYNC_NONE       0
-#define BX_CLOCK_SYNC_REALTIME   1
-#define BX_CLOCK_SYNC_SLOWDOWN   2
-#define BX_CLOCK_SYNC_BOTH       3
-#define BX_CLOCK_SYNC_LAST       3
+enum {
+  BX_CLOCK_SYNC_NONE,
+  BX_CLOCK_SYNC_REALTIME,
+  BX_CLOCK_SYNC_SLOWDOWN,
+  BX_CLOCK_SYNC_BOTH
+};
+#define BX_CLOCK_SYNC_LAST       BX_CLOCK_SYNC_BOTH
 
-#define BX_CPUID_SUPPORT_NOSSE   0
-#define BX_CPUID_SUPPORT_SSE     1
-#define BX_CPUID_SUPPORT_SSE2    2
-#define BX_CPUID_SUPPORT_SSE3    3
-#define BX_CPUID_SUPPORT_SSSE3   4
-#define BX_CPUID_SUPPORT_SSE4_1  5
-#define BX_CPUID_SUPPORT_SSE4_2  6
+enum {
+  BX_CPUID_SUPPORT_NOSSE,
+  BX_CPUID_SUPPORT_SSE,
+  BX_CPUID_SUPPORT_SSE2,
+  BX_CPUID_SUPPORT_SSE3,
+  BX_CPUID_SUPPORT_SSSE3,
+  BX_CPUID_SUPPORT_SSE4_1,
+  BX_CPUID_SUPPORT_SSE4_2
+};
+
+enum {
+  BX_CPUID_SUPPORT_LEGACY_APIC,
+  BX_CPUID_SUPPORT_XAPIC,
+  BX_CPUID_SUPPORT_X2APIC
+};
 
 #define BX_CLOCK_TIME0_LOCAL     1
 #define BX_CLOCK_TIME0_UTC       2
@@ -559,9 +567,10 @@ enum ci_command_t { CI_START, CI_RUNTIME_CONFIG, CI_SHUTDOWN };
 enum ci_return_t {
   CI_OK,                  // normal return value
   CI_ERR_NO_TEXT_CONSOLE  // err: can't work because there's no text console
-  };
+};
 typedef int (*config_interface_callback_t)(void *userdata, ci_command_t command);
 typedef BxEvent* (*bxevent_handler)(void *theclass, BxEvent *event);
+typedef void (*rt_conf_handler_t)(void *this_ptr);
 typedef Bit32s (*user_option_parser_t)(const char *context, int num_params, char *params[]);
 typedef Bit32s (*user_option_save_t)(FILE *fp);
 
@@ -682,6 +691,8 @@ public:
     void *userdata) {}
   virtual int configuration_interface(const char* name, ci_command_t command) {return -1; }
   virtual int begin_simulation(int argc, char *argv[]) {return -1;}
+  virtual bx_bool register_runtime_config_handler(void *dev, rt_conf_handler_t handler) {return 0;}
+  virtual void update_runtime_options() {}
   typedef bx_bool (*is_sim_thread_func_t)();
   is_sim_thread_func_t is_sim_thread_func;
   virtual void set_sim_thread_func(is_sim_thread_func_t func) {

@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2009  The Bochs Project
+//  Copyright (C) 2001-2011  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -24,8 +24,10 @@
 #include "cpu.h"
 #define LOG_THIS BX_CPU_THIS_PTR
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAA(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::AAA(bxInstruction_c *i)
 {
+  int tmpCF = 0, tmpAF = 0;
+
   /*
    *  Note: This instruction incorrectly documented in Intel's materials.
    *        The right description is:
@@ -51,12 +53,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAA(bxInstruction_c *i)
   if (((AL & 0x0f) > 9) || get_AF())
   {
     AX = AX + 0x106;
-    assert_AF();
-    assert_CF();
-  }
-  else {
-    clear_AF();
-    clear_CF();
+    tmpAF = tmpCF = 1;
   }
 
   AL = AL & 0x0f;
@@ -66,25 +63,23 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAA(bxInstruction_c *i)
 
   /* The following behaviour seems to match the P6 and
      its derived processors. */
-  clear_OF();
-  clear_SF(); /* sign is always 0 because bits 4-7 of AL are zeroed */
-  set_ZF(AL == 0);
-  set_PF_base(AL);
+  SET_FLAGS_OSZAPC_LOGIC_8(AL);
+  set_CF(tmpCF);
+  set_AF(tmpAF);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAS(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::AAS(bxInstruction_c *i)
 {
+  int tmpCF = 0, tmpAF = 0;
+
   /* AAS affects the following flags: A,C */
 
   if (((AL & 0x0F) > 0x09) || get_AF())
   {
     AX = AX - 0x106;
-    assert_AF();
-    assert_CF();
-  }
-  else {
-    clear_CF();
-    clear_AF();
+    tmpAF = tmpCF = 1;
   }
 
   AL = AL & 0x0f;
@@ -94,13 +89,14 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAS(bxInstruction_c *i)
 
   /* The following behaviour seems to match the P6 and
      its derived processors. */
-  clear_OF();
-  clear_SF(); /* sign is always 0 because bits 4-7 of AL are zeroed */
-  set_ZF(AL == 0);
-  set_PF_base(AL);
+  SET_FLAGS_OSZAPC_LOGIC_8(AL);
+  set_CF(tmpCF);
+  set_AF(tmpAF);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAM(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::AAM(bxInstruction_c *i)
 {
   Bit8u al, imm8 = i->Ib();
 
@@ -115,9 +111,11 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAM(bxInstruction_c *i)
   /* The following behaviour seems to match the P6 and
      its derived processors. */
   SET_FLAGS_OSZAPC_LOGIC_8(AL);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAD(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::AAD(bxInstruction_c *i)
 {
   Bit16u tmp = AH;
   tmp *= i->Ib();
@@ -129,12 +127,14 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::AAD(bxInstruction_c *i)
   /* The following behaviour seems to match the P6 and
      its derived processors. */
   SET_FLAGS_OSZAPC_LOGIC_8(AL);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::DAA(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::DAA(bxInstruction_c *i)
 {
   Bit8u tmpAL = AL;
-  int   tmpCF = 0;
+  int   tmpCF = 0, tmpAF = 0;
 
   /* Validated against Intel Pentium family hardware. */
 
@@ -144,27 +144,23 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::DAA(bxInstruction_c *i)
   {
     tmpCF = ((AL > 0xF9) || get_CF());
     AL = AL + 0x06;
-    assert_AF();
+    tmpAF = 1;
   }
-  else
-    clear_AF();
 
   if ((tmpAL > 0x99) || get_CF())
   {
     AL = AL + 0x60;
     tmpCF = 1;
   }
-  else
-    tmpCF = 0;
 
-  clear_OF();	/* undocumented flag modification */
-  set_SF(AL >= 0x80);
-  set_ZF(AL==0);
-  set_PF_base(AL);
+  SET_FLAGS_OSZAPC_LOGIC_8(AL);
   set_CF(tmpCF);
+  set_AF(tmpAF);
+
+  BX_NEXT_INSTR(i);
 }
 
-void BX_CPP_AttrRegparmN(1) BX_CPU_C::DAS(bxInstruction_c *i)
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::DAS(bxInstruction_c *i)
 {
   /* The algorithm for DAS is fashioned after the pseudo code in the
    * Pentium Processor Family Developer's Manual, volume 3.  It seems
@@ -175,7 +171,7 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::DAS(bxInstruction_c *i)
    */
 
   Bit8u tmpAL = AL;
-  int tmpCF = 0;
+  int tmpCF = 0, tmpAF = 0;
 
   /* DAS effect the following flags: A,C,S,Z,P */
 
@@ -183,10 +179,8 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::DAS(bxInstruction_c *i)
   {
     tmpCF = (AL < 0x06) || get_CF();
     AL = AL - 0x06;
-    assert_AF();
+    tmpAF = 1;
   }
-  else
-    clear_AF();
 
   if ((tmpAL > 0x99) || get_CF())
   {
@@ -194,9 +188,9 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::DAS(bxInstruction_c *i)
     tmpCF = 1;
   }
 
-  clear_OF();	/* undocumented flag modification */
-  set_SF(AL >= 0x80);
-  set_ZF(AL==0);
-  set_PF_base(AL);
+  SET_FLAGS_OSZAPC_LOGIC_8(AL);
   set_CF(tmpCF);
+  set_AF(tmpAF);
+
+  BX_NEXT_INSTR(i);
 }

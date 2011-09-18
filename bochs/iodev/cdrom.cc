@@ -79,10 +79,6 @@ extern "C" {
 #define CD_FRAMESIZE 2048
 }
 
-#elif defined(__BEOS__)
-#include "cdrom_beos.h"
-#define BX_CD_FRAMESIZE 2048
-
 #elif (defined(__NetBSD__) || defined(__NetBSD_kernel__) || defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__))
 // OpenBSD pre version 2.7 may require extern "C" { } structure around
 // all the includes, because the i386 sys/disklabel.h contains code which
@@ -91,6 +87,9 @@ extern "C" {
 #include <sys/param.h>
 #include <sys/file.h>
 #include <sys/cdio.h>
+#if defined(__OpenBSD__)
+#include <sys/dkio.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/disklabel.h>
 // ntohl(x) et al have been moved out of sys/param.h in FreeBSD 5
@@ -114,16 +113,12 @@ extern "C" {
 #include <paths.h>
 #include <sys/param.h>
 
-#define Float32 KLUDGE_Float32
-#define Float64 KLUDGE_Float64
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOBSD.h>
 #include <IOKit/storage/IOCDMedia.h>
 #include <IOKit/storage/IOMedia.h>
 #include <IOKit/storage/IOCDTypes.h>
 #include <CoreFoundation/CoreFoundation.h>
-#undef Float32
-#undef Float64
 
 // These definitions were taken from mount_cd9660.c
 // There are some similar definitions in IOCDTypes.h
@@ -515,20 +510,14 @@ cdrom_interface::cdrom_interface(const char *dev)
   bUseASPI = FALSE;
   osinfo.dwOSVersionInfoSize = sizeof(osinfo);
   GetVersionEx(&osinfo);
-  isWindowsXP = (osinfo.dwMajorVersion >= 5) && (osinfo.dwMinorVersion >= 1);
+  isWindowsXP = (osinfo.dwMajorVersion > 5) ||
+                ((osinfo.dwMajorVersion == 5) && (osinfo.dwMinorVersion >= 1));
 #endif
-}
-
-void cdrom_interface::init(void)
-{
-  BX_DEBUG(("Init $Id$"));
-  BX_INFO(("file = '%s'",path));
 }
 
 cdrom_interface::~cdrom_interface(void)
 {
-#ifdef WIN32
-#else
+#ifndef WIN32
   if (fd >= 0)
     close(fd);
 #endif
@@ -747,7 +736,6 @@ void cdrom_interface::eject_cdrom()
     fd = -1;
   }
 }
-
 
 bx_bool cdrom_interface::read_toc(Bit8u* buf, int* length, bx_bool msf, int start_track, int format)
 {
@@ -1167,9 +1155,7 @@ Bit32u cdrom_interface::capacity()
   }
 #endif
 
-#ifdef __BEOS__
-  return GetNumDeviceBlocks(fd, BX_CD_FRAMESIZE);
-#elif defined(__sun)
+#if defined(__sun)
   {
     struct stat buf = {0};
 

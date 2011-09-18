@@ -26,9 +26,9 @@
 //
 // there are still many unimplemented features:
 //
-// - destination write mask support is not complete (bit 5..7)
-// - 1bpp/4bpp modes
-// - ???
+// - destination write mask support is not complete (bit 5..6)
+// - BLT mode extension support is not complete (bit 3..4)
+// - 4bpp modes
 //
 // some codes are copied from vga.cc and modified.
 // some codes are ported from the cirrus emulation in qemu
@@ -39,6 +39,7 @@
 #include "iodev.h"
 #include "vga.h"
 #include "svga_cirrus.h"
+#include "virt_timer.h"
 
 #if BX_SUPPORT_CLGD54XX
 
@@ -141,14 +142,16 @@
 #define CIRRUS_ROP_NOTSRC_AND_DST       0x50
 #define CIRRUS_ROP_SRC_XOR_DST          0x59
 #define CIRRUS_ROP_SRC_OR_DST           0x6d
-#define CIRRUS_ROP_NOTSRC_OR_NOTDST     0x90
+#define CIRRUS_ROP_NOTSRC_AND_NOTDST    0x90
 #define CIRRUS_ROP_SRC_NOTXOR_DST       0x95
 #define CIRRUS_ROP_SRC_OR_NOTDST        0xad
 #define CIRRUS_ROP_NOTSRC               0xd0
 #define CIRRUS_ROP_NOTSRC_OR_DST        0xd6
-#define CIRRUS_ROP_NOTSRC_AND_NOTDST    0xda
+#define CIRRUS_ROP_NOTSRC_OR_NOTDST     0xda
 
 // control 0x33
+#define CIRRUS_BLTMODEEXT_SYNCDISPSWITCH   0x10 // unimplemented
+#define CIRRUS_BLTMODEEXT_BKGNDONLYCLIP    0x08 // unimplemented
 #define CIRRUS_BLTMODEEXT_SOLIDFILL        0x04
 #define CIRRUS_BLTMODEEXT_COLOREXPINV      0x02
 #define CIRRUS_BLTMODEEXT_DWORDGRANULARITY 0x01
@@ -233,9 +236,9 @@ void libvga_LTX_plugin_fini(void)
   delete theSvga;
 }
 
-bx_svga_cirrus_c::bx_svga_cirrus_c() : bx_vga_c ()
+bx_svga_cirrus_c::bx_svga_cirrus_c() : bx_vga_c()
 {
-  put("CLVGA");
+  // nothing else to do
 }
 
 bx_svga_cirrus_c::~bx_svga_cirrus_c()
@@ -243,19 +246,14 @@ bx_svga_cirrus_c::~bx_svga_cirrus_c()
   BX_DEBUG(("Exit"));
 }
 
-void bx_svga_cirrus_c::init(void)
+void bx_svga_cirrus_c::init_vga_extension(void)
 {
-  // initialize VGA stuffs.
-  BX_CIRRUS_THIS bx_vga_c::init();
   if (!strcmp(SIM->get_param_string(BXPN_VGA_EXTENSION)->getptr(), "cirrus")) {
+    BX_CIRRUS_THIS put("CLVGA");
     // initialize SVGA stuffs.
-    BX_CIRRUS_THIS bx_vga_c::init_iohandlers(
-        svga_read_handler, svga_write_handler);
-    BX_CIRRUS_THIS bx_vga_c::init_systemtimer(
-        svga_timer_handler, svga_param_handler);
-#if BX_SUPPORT_PCI
+    BX_CIRRUS_THIS bx_vga_c::init_iohandlers(svga_read_handler, svga_write_handler);
+    BX_CIRRUS_THIS bx_vga_c::init_systemtimer(svga_timer_handler, svga_param_handler);
     BX_CIRRUS_THIS pci_enabled = DEV_is_pci_device("cirrus");
-#endif
     BX_CIRRUS_THIS svga_init_members();
 #if BX_SUPPORT_PCI
     if (BX_CIRRUS_THIS pci_enabled)
@@ -271,11 +269,8 @@ void bx_svga_cirrus_c::init(void)
     BX_CIRRUS_THIS extension_init = 1;
   } else {
     BX_CIRRUS_THIS sequencer.reg[0x07] = 0x00; // Cirrus extension disabled
-    // initialize VGA read/write handlers and timer
-    BX_CIRRUS_THIS bx_vga_c::init_iohandlers(
-        bx_vga_c::read_handler, bx_vga_c::write_handler);
-    BX_CIRRUS_THIS bx_vga_c::init_systemtimer(
-        bx_vga_c::timer_handler, bx_vga_c::vga_param_handler);
+    // initialize VGA extension, read/write handlers and timer
+    BX_CIRRUS_THIS bx_vga_c::init_vga_extension();
   }
 }
 
@@ -298,10 +293,10 @@ void bx_svga_cirrus_c::svga_init_members()
   BX_CIRRUS_THIS hidden_dac.lockindex = 0;
   BX_CIRRUS_THIS hidden_dac.data = 0x00;
 
-  BX_CIRRUS_THIS svga_unlock_special = false;
-  BX_CIRRUS_THIS svga_needs_update_tile = true;
-  BX_CIRRUS_THIS svga_needs_update_dispentire = true;
-  BX_CIRRUS_THIS svga_needs_update_mode = false;
+  BX_CIRRUS_THIS svga_unlock_special = 0;
+  BX_CIRRUS_THIS svga_needs_update_tile = 1;
+  BX_CIRRUS_THIS svga_needs_update_dispentire = 1;
+  BX_CIRRUS_THIS svga_needs_update_mode = 0;
 
   BX_CIRRUS_THIS svga_xres = 640;
   BX_CIRRUS_THIS svga_yres = 480;
@@ -328,6 +323,7 @@ void bx_svga_cirrus_c::svga_init_members()
   BX_CIRRUS_THIS sequencer.reg[0x07] = 0x00; // 0xf0:linearbase(0x00 if disabled)
 #if BX_SUPPORT_PCI
   if (BX_CIRRUS_THIS pci_enabled) {
+    BX_CIRRUS_THIS svga_unlock_special = 1;
     BX_CIRRUS_THIS crtc.reg[0x27] = ID_CLGD5446;
     BX_CIRRUS_THIS sequencer.reg[0x1F] = 0x2d; // MemClock
     BX_CIRRUS_THIS control.reg[0x18] = 0x0f;
@@ -419,7 +415,7 @@ void bx_svga_cirrus_c::register_state(void)
     new bx_shadow_num_c(cursor, "size", &BX_CIRRUS_THIS hw_cursor.size, BASE_HEX);
 #if BX_SUPPORT_PCI
     if (BX_CIRRUS_THIS pci_enabled) {
-      register_pci_state(list, BX_CIRRUS_THIS pci_conf);
+      register_pci_state(list);
     }
 #endif
   }
@@ -435,17 +431,24 @@ void bx_svga_cirrus_c::after_restore_state(void)
     if (BX_CIRRUS_THIS pci_enabled) {
       if (DEV_pci_set_base_mem(BX_CIRRUS_THIS_PTR, cirrus_mem_read_handler,
                                cirrus_mem_write_handler,
-                               &BX_CIRRUS_THIS pci_memaddr,
+                               &BX_CIRRUS_THIS pci_base_address[0],
                                &BX_CIRRUS_THIS pci_conf[0x10],
                                0x2000000)) {
-        BX_INFO(("new pci_memaddr: 0x%04x", BX_CIRRUS_THIS pci_memaddr));
+        BX_INFO(("new pci_memaddr: 0x%04x", BX_CIRRUS_THIS pci_base_address[0]));
       }
       if (DEV_pci_set_base_mem(BX_CIRRUS_THIS_PTR, cirrus_mem_read_handler,
                                cirrus_mem_write_handler,
-                               &BX_CIRRUS_THIS pci_mmioaddr,
+                               &BX_CIRRUS_THIS pci_base_address[1],
                                &BX_CIRRUS_THIS pci_conf[0x14],
                                CIRRUS_PNPMMIO_SIZE)) {
-        BX_INFO(("new pci_mmioaddr = 0x%08x", BX_CIRRUS_THIS pci_mmioaddr));
+        BX_INFO(("new pci_mmioaddr = 0x%08x", BX_CIRRUS_THIS pci_base_address[1]));
+      }
+      if (DEV_pci_set_base_mem(BX_CIRRUS_THIS_PTR, cirrus_mem_read_handler,
+                               cirrus_mem_write_handler,
+                               &BX_CIRRUS_THIS pci_rom_address,
+                               &BX_CIRRUS_THIS pci_conf[0x30],
+                               BX_CIRRUS_THIS pci_rom_size)) {
+        BX_INFO(("new ROM address: 0x%08x", BX_CIRRUS_THIS pci_rom_address));
       }
     }
 #endif
@@ -477,7 +480,7 @@ void bx_svga_cirrus_c::redraw_area(unsigned x0, unsigned y0,
     return;
   }
 
-  BX_CIRRUS_THIS svga_needs_update_tile = true;
+  BX_CIRRUS_THIS svga_needs_update_tile = 1;
 
   xt0 = x0 / X_TILESIZE;
   yt0 = y0 / Y_TILESIZE;
@@ -559,14 +562,27 @@ bx_bool bx_svga_cirrus_c::cirrus_mem_read_handler(bx_phy_address addr, unsigned 
 
 Bit8u bx_svga_cirrus_c::mem_read(bx_phy_address addr)
 {
+#if BX_SUPPORT_PCI
+  if (BX_CIRRUS_THIS pci_enabled) {
+    if ((addr >= BX_CIRRUS_THIS pci_rom_address) &&
+        (addr < (BX_CIRRUS_THIS pci_rom_address + BX_CIRRUS_THIS pci_rom_size))) {
+      if (BX_CIRRUS_THIS pci_conf[0x30] & 0x01) {
+        return BX_CIRRUS_THIS pci_rom[addr - BX_CIRRUS_THIS pci_rom_address];
+      } else {
+        return 0xff;
+      }
+    }
+  }
+#endif
+
   if ((BX_CIRRUS_THIS sequencer.reg[0x07] & 0x01) == CIRRUS_SR7_BPP_VGA) {
     return BX_CIRRUS_THIS bx_vga_c::mem_read(addr);
   }
 
 #if BX_SUPPORT_PCI
   if (BX_CIRRUS_THIS pci_enabled) {
-    if ((addr >= BX_CIRRUS_THIS pci_memaddr) &&
-        (addr < (BX_CIRRUS_THIS pci_memaddr + CIRRUS_PNPMEM_SIZE))) {
+    if ((addr >= BX_CIRRUS_THIS pci_base_address[0]) &&
+        (addr < (BX_CIRRUS_THIS pci_base_address[0] + CIRRUS_PNPMEM_SIZE))) {
       Bit8u *ptr;
 
       Bit32u offset = addr & (BX_CIRRUS_THIS s.memsize - 1);
@@ -597,8 +613,8 @@ Bit8u bx_svga_cirrus_c::mem_read(bx_phy_address addr)
       }
       offset &= (BX_CIRRUS_THIS s.memsize - 1);
       return *(ptr + offset);
-    } else if ((addr >= BX_CIRRUS_THIS pci_mmioaddr) &&
-      (addr < (BX_CIRRUS_THIS pci_mmioaddr + CIRRUS_PNPMMIO_SIZE))) {
+    } else if ((addr >= BX_CIRRUS_THIS pci_base_address[1]) &&
+      (addr < (BX_CIRRUS_THIS pci_base_address[1] + CIRRUS_PNPMMIO_SIZE))) {
 
       Bit32u offset = addr & (CIRRUS_PNPMMIO_SIZE - 1);
       if (offset >= 0x100) {
@@ -692,8 +708,8 @@ void bx_svga_cirrus_c::mem_write(bx_phy_address addr, Bit8u value)
 
 #if BX_SUPPORT_PCI
   if (BX_CIRRUS_THIS pci_enabled) {
-    if ((addr >= BX_CIRRUS_THIS pci_memaddr) &&
-        (addr < (BX_CIRRUS_THIS pci_memaddr + CIRRUS_PNPMEM_SIZE))) {
+    if ((addr >= BX_CIRRUS_THIS pci_base_address[0]) &&
+        (addr < (BX_CIRRUS_THIS pci_base_address[0] + CIRRUS_PNPMEM_SIZE))) {
 
       Bit32u offset = addr & (BX_CIRRUS_THIS s.memsize - 1);
       if ((offset >= (BX_CIRRUS_THIS s.memsize - 256)) &&
@@ -728,12 +744,12 @@ void bx_svga_cirrus_c::mem_write(bx_phy_address addr, Bit8u value)
           mem_write_mode4and5_16bpp(mode, offset, value);
         }
       }
-      BX_CIRRUS_THIS svga_needs_update_tile = true;
+      BX_CIRRUS_THIS svga_needs_update_tile = 1;
       SET_TILE_UPDATED(((offset % BX_CIRRUS_THIS svga_pitch) / (BX_CIRRUS_THIS svga_bpp / 8)) / X_TILESIZE,
                        (offset / BX_CIRRUS_THIS svga_pitch) / Y_TILESIZE, 1);
       return;
-    } else if ((addr >= BX_CIRRUS_THIS pci_mmioaddr) &&
-               (addr < (BX_CIRRUS_THIS pci_mmioaddr + CIRRUS_PNPMMIO_SIZE))) {
+    } else if ((addr >= BX_CIRRUS_THIS pci_base_address[1]) &&
+               (addr < (BX_CIRRUS_THIS pci_base_address[1] + CIRRUS_PNPMMIO_SIZE))) {
       // memory-mapped I/O.
 
       // BX_DEBUG(("write mmio 0x%08x",addr));
@@ -782,7 +798,7 @@ void bx_svga_cirrus_c::mem_write(bx_phy_address addr, Bit8u value)
           mem_write_mode4and5_16bpp(mode, offset, value);
         }
       }
-      BX_CIRRUS_THIS svga_needs_update_tile = true;
+      BX_CIRRUS_THIS svga_needs_update_tile = 1;
       SET_TILE_UPDATED(((offset % BX_CIRRUS_THIS svga_pitch) / (BX_CIRRUS_THIS svga_bpp / 8)) / X_TILESIZE,
                        (offset / BX_CIRRUS_THIS svga_pitch) / Y_TILESIZE, 1);
     }
@@ -798,10 +814,51 @@ void bx_svga_cirrus_c::mem_write(bx_phy_address addr, Bit8u value)
   }
 }
 
+int bx_svga_cirrus_c::get_snapshot_mode()
+{
+  if ((BX_CIRRUS_THIS sequencer.reg[0x07] & 0x01) == CIRRUS_SR7_BPP_VGA) {
+    return BX_CIRRUS_THIS bx_vga_c::get_snapshot_mode();
+  } else {
+    return BX_GUI_SNAPSHOT_GFX;
+  }
+}
+
 void bx_svga_cirrus_c::get_text_snapshot(Bit8u **text_snapshot,
                                     unsigned *txHeight, unsigned *txWidth)
 {
   BX_CIRRUS_THIS bx_vga_c::get_text_snapshot(text_snapshot,txHeight,txWidth);
+}
+
+Bit32u bx_svga_cirrus_c::get_gfx_snapshot(Bit8u **snapshot_ptr, Bit8u **palette_ptr,
+                                          unsigned *iHeight, unsigned *iWidth, unsigned *iDepth)
+{
+  Bit32u len, len1;
+  unsigned i;
+  Bit8u *dst_ptr, *src_ptr;
+
+  if ((BX_CIRRUS_THIS sequencer.reg[0x07] & 0x01) != CIRRUS_SR7_BPP_VGA) {
+    *iHeight = BX_CIRRUS_THIS svga_yres;
+    *iWidth = BX_CIRRUS_THIS svga_xres;
+    *iDepth = BX_CIRRUS_THIS svga_dispbpp;
+    len1 = BX_CIRRUS_THIS svga_xres * (BX_CIRRUS_THIS svga_bpp >> 3);
+    len = len1 * BX_CIRRUS_THIS svga_yres;
+    *snapshot_ptr = (Bit8u*)malloc(len);
+    if (snapshot_ptr == NULL)
+      return 0;
+    src_ptr = BX_CIRRUS_THIS disp_ptr;
+    dst_ptr = *snapshot_ptr;
+    for (i = 0; i < BX_CIRRUS_THIS svga_yres; i++) {
+      memcpy(dst_ptr, src_ptr, len1);
+      src_ptr += BX_CIRRUS_THIS svga_pitch;
+      dst_ptr += len1;
+    }
+    if (*iDepth == 8) {
+      BX_CIRRUS_THIS get_dac_palette(palette_ptr, 2);
+    }
+    return len;
+  } else {
+    return BX_CIRRUS_THIS bx_vga_c::get_gfx_snapshot(snapshot_ptr, palette_ptr, iHeight, iWidth, iDepth);
+  }
 }
 
 void bx_svga_cirrus_c::trigger_timer(void *this_ptr)
@@ -811,10 +868,18 @@ void bx_svga_cirrus_c::trigger_timer(void *this_ptr)
 
 Bit64s bx_svga_cirrus_c::svga_param_handler(bx_param_c *param, int set, Bit64s val)
 {
+  Bit32u interval;
+
   if (set) {
-    BX_INFO (("Changing timer interval to %d", (Bit32u)val));
-    BX_CIRRUS_THIS svga_timer_handler (theSvga);
-    bx_pc_system.activate_timer (BX_CIRRUS_THIS timer_id, (Bit32u)val, 1);
+    interval = (Bit32u)(1000000 / val);
+    BX_INFO(("Changing timer interval to %d", interval));
+    BX_CIRRUS_THIS svga_timer_handler(theSvga);
+    bx_virt_timer.activate_timer(BX_CIRRUS_THIS timer_id, interval, 1);
+    if (interval < 300000) {
+      BX_CIRRUS_THIS s.blink_counter = 300000 / (unsigned)interval;
+    } else {
+      BX_CIRRUS_THIS s.blink_counter = 1;
+    }
   }
   return val;
 }
@@ -972,7 +1037,7 @@ void bx_svga_cirrus_c::svga_write(Bit32u address, Bit32u value, unsigned io_len)
       }
       break;
     case 0x03c9: /* PEL Data Register, hidden pel colors 00..0F */
-      BX_CIRRUS_THIS svga_needs_update_dispentire = true;
+      BX_CIRRUS_THIS svga_needs_update_dispentire = 1;
 
       if (BX_CIRRUS_THIS sequencer.reg[0x12] & CIRRUS_CURSOR_HIDDENPEL) {
         Bit8u index = (BX_CIRRUS_THIS s.pel.write_data_register & 0x0f) * 3 +
@@ -1210,7 +1275,7 @@ void bx_svga_cirrus_c::svga_update(void)
   if ((BX_CIRRUS_THIS sequencer.reg[0x07] & 0x01) == CIRRUS_SR7_BPP_VGA) {
     if (BX_CIRRUS_THIS svga_needs_update_mode) {
       BX_CIRRUS_THIS s.vga_mem_updated = 1;
-      BX_CIRRUS_THIS svga_needs_update_mode = false;
+      BX_CIRRUS_THIS svga_needs_update_mode = 0;
     }
     BX_CIRRUS_THIS bx_vga_c::update();
     return;
@@ -1230,19 +1295,19 @@ void bx_svga_cirrus_c::svga_update(void)
     height = BX_CIRRUS_THIS svga_yres;
     bx_gui->dimension_update(width, height, 0, 0, BX_CIRRUS_THIS svga_dispbpp);
     BX_CIRRUS_THIS s.last_bpp = BX_CIRRUS_THIS svga_dispbpp;
-    BX_CIRRUS_THIS svga_needs_update_mode = false;
-    BX_CIRRUS_THIS svga_needs_update_dispentire = true;
+    BX_CIRRUS_THIS svga_needs_update_mode = 0;
+    BX_CIRRUS_THIS svga_needs_update_dispentire = 1;
   }
 
   if (BX_CIRRUS_THIS svga_needs_update_dispentire) {
     BX_CIRRUS_THIS redraw_area(0,0,width,height);
-    BX_CIRRUS_THIS svga_needs_update_dispentire = false;
+    BX_CIRRUS_THIS svga_needs_update_dispentire = 0;
   }
 
   if (!BX_CIRRUS_THIS svga_needs_update_tile) {
     return;
   }
-  BX_CIRRUS_THIS svga_needs_update_tile = false;
+  BX_CIRRUS_THIS svga_needs_update_tile = 0;
 
   unsigned xc, yc, xti, yti;
   unsigned r, c, w, h;
@@ -1633,7 +1698,7 @@ void bx_svga_cirrus_c::svga_write_crtc(Bit32u address, unsigned index, Bit8u val
     case 0x12: // VGA
     case 0x1A: // 0x01: interlaced video mode
     case 0x1D: // 0x80: offset 0x080000 (>=CLGD5434)
-      BX_CIRRUS_THIS svga_needs_update_mode = true;
+      BX_CIRRUS_THIS svga_needs_update_mode = 1;
       break;
 
     case 0x13: // VGA
@@ -1659,7 +1724,7 @@ void bx_svga_cirrus_c::svga_write_crtc(Bit32u address, unsigned index, Bit8u val
 
   if (update_pitch) {
     BX_CIRRUS_THIS svga_pitch = (BX_CIRRUS_THIS crtc.reg[0x13] << 3) | ((BX_CIRRUS_THIS crtc.reg[0x1b] & 0x10) << 7);
-    BX_CIRRUS_THIS svga_needs_update_mode = true;
+    BX_CIRRUS_THIS svga_needs_update_mode = 1;
   }
 }
 
@@ -1731,22 +1796,27 @@ void bx_svga_cirrus_c::svga_write_sequencer(Bit32u address, unsigned index, Bit8
       break;
     case 0x01:  // VGA
     case 0x04:  // VGA
-      BX_CIRRUS_THIS svga_needs_update_mode = true;
+      BX_CIRRUS_THIS svga_needs_update_mode = 1;
       break;
     case 0x6: // cirrus unlock extensions
       value &= 0x17;
       if (value == 0x12) {
-        BX_CIRRUS_THIS svga_unlock_special = true;
+        BX_CIRRUS_THIS svga_unlock_special = 1;
         BX_CIRRUS_THIS sequencer.reg[0x6] = 0x12;
-      }
-      else {
-        BX_CIRRUS_THIS svga_unlock_special = false;
+      } else {
+#if BX_SUPPORT_PCI
+        BX_CIRRUS_THIS svga_unlock_special = 0;
+#else
+        if (!BX_CIRRUS_THIS pci_enabled) {
+          BX_CIRRUS_THIS svga_unlock_special = 0;
+        }
+#endif
         BX_CIRRUS_THIS sequencer.reg[0x6] = 0x0f;
       }
       return;
     case 0x7: // cirrus extended sequencer mode
       if (value != BX_CIRRUS_THIS sequencer.reg[0x7]) {
-        BX_CIRRUS_THIS svga_needs_update_mode = true;
+        BX_CIRRUS_THIS svga_needs_update_mode = 1;
       }
       break;
     case 0x08:
@@ -1900,7 +1970,7 @@ Bit8u bx_svga_cirrus_c::svga_read_control(Bit32u address, unsigned index)
 
 void bx_svga_cirrus_c::svga_write_control(Bit32u address, unsigned index, Bit8u value)
 {
-  Bit8u old_value;
+  Bit8u old_value = BX_CIRRUS_THIS control.reg[index];
 
   BX_DEBUG(("control: index 0x%02x write 0x%02x", index, (unsigned)value));
 
@@ -1919,7 +1989,7 @@ void bx_svga_cirrus_c::svga_write_control(Bit32u address, unsigned index, Bit8u 
       break;
     case 0x05:  // VGA
     case 0x06:  // VGA
-      BX_CIRRUS_THIS svga_needs_update_mode = true;
+      BX_CIRRUS_THIS svga_needs_update_mode = 1;
       break;
     case 0x09: // bank offset #0
     case 0x0A: // bank offset #1
@@ -1977,14 +2047,13 @@ void bx_svga_cirrus_c::svga_write_control(Bit32u address, unsigned index, Bit8u 
       value &= 0x3f;
       break;
     case 0x2f: // BLT WRITE MASK
-      if (value & ~0x1f) {
+      if (((value ^ old_value) & 0x60) && (value & 0x60)) {
         BX_ERROR(("BLT WRITE MASK support is not complete (value = 0x%02x)", value));
       }
       break;
     case 0x30: // BLT MODE
       break;
     case 0x31: // BLT STATUS/START
-      old_value = BX_CIRRUS_THIS control.reg[0x31];
       BX_CIRRUS_THIS control.reg[0x31] = value;
       if (((old_value & CIRRUS_BLT_RESET) != 0) &&
           ((value & CIRRUS_BLT_RESET) == 0)) {
@@ -1997,14 +2066,27 @@ void bx_svga_cirrus_c::svga_write_control(Bit32u address, unsigned index, Bit8u 
       }
       return;
     case 0x32: // RASTER OP
+      break;
     case 0x33: // BLT MODE EXTENSION
+#if BX_SUPPORT_PCI
+      if (BX_CIRRUS_THIS pci_enabled) {
+        if (((value ^ old_value) & 0x18) && (value & 0x18)) {
+          BX_ERROR(("BLT MODE EXTENSION support is not complete (value = 0x%02x)", value & 0x18));
+        }
+      }
+      else
+#endif
+      {
+        BX_DEBUG(("BLT MODE EXTENSION not available"));
+        return;
+      }
       break;
     case 0x34: // BLT TRANSPARENT COLOR 0x00ff
     case 0x35: // BLT TRANSPARENT COLOR 0xff00
     case 0x38: // BLT TRANSPARENT COLOR MASK 0x00ff
     case 0x39: // BLT TRANSPARENT COLOR MASK 0xff00
     default:
-      BX_DEBUG(("control index 0x%02x is unknown(write 0x%02x)", index, (unsigned)value));
+      BX_DEBUG(("control index 0x%02x is unknown (write 0x%02x)", index, (unsigned)value));
       break;
     }
 
@@ -2019,11 +2101,8 @@ void bx_svga_cirrus_c::svga_write_control(Bit32u address, unsigned index, Bit8u 
 Bit8u bx_svga_cirrus_c::svga_mmio_vga_read(Bit32u address)
 {
   Bit8u value = 0xff;
-//  bx_bool svga_unlock_special_old = BX_CIRRUS_THIS svga_unlock_special;
 
   BX_DEBUG(("MMIO vga read - address 0x%04x, value 0x%02x",address,value));
-
-//  BX_CIRRUS_THIS svga_unlock_special = true;
 
 #if BX_USE_CIRRUS_SMF
   value = (Bit8u)svga_read_handler(theSvga,0x3c0+address,1);
@@ -2031,17 +2110,13 @@ Bit8u bx_svga_cirrus_c::svga_mmio_vga_read(Bit32u address)
   value = (Bit8u)svga_read(0x3c0+address,1);
 #endif // BX_USE_CIRRUS_SMF
 
-//  BX_CIRRUS_THIS svga_unlock_special = svga_unlock_special_old;
   return value;
 }
 
 void bx_svga_cirrus_c::svga_mmio_vga_write(Bit32u address,Bit8u value)
 {
-//  bx_bool svga_unlock_special_old = BX_CIRRUS_THIS svga_unlock_special;
 
   BX_DEBUG(("MMIO vga write - address 0x%04x, value 0x%02x",address,value));
-
-//  BX_CIRRUS_THIS svga_unlock_special = true;
 
 #if BX_USE_CIRRUS_SMF
   svga_write_handler(theSvga,0x3c0+address,value,1);
@@ -2049,16 +2124,6 @@ void bx_svga_cirrus_c::svga_mmio_vga_write(Bit32u address,Bit8u value)
   svga_write(0x3c0+address,value,1);
 #endif // BX_USE_CIRRUS_SMF
 
-/*  switch (BX_CIRRUS_THIS sequencer.reg[0x06]) {
-    case 0x0f:
-      svga_unlock_special_old = false;
-      break;
-    case 0x12:
-      svga_unlock_special_old = true;
-      break;
-    }
-
-  BX_CIRRUS_THIS svga_unlock_special = svga_unlock_special_old;*/
 }
 
 Bit8u bx_svga_cirrus_c::svga_mmio_blt_read(Bit32u address)
@@ -2344,8 +2409,10 @@ void bx_svga_cirrus_c::svga_init_pcihandlers(void)
   BX_CIRRUS_THIS pci_conf[0x0b] = PCI_CLASS_BASE_DISPLAY;
   BX_CIRRUS_THIS pci_conf[0x0e] = PCI_CLASS_HEADERTYPE_00h;
 
-  BX_CIRRUS_THIS pci_memaddr = 0;
-  BX_CIRRUS_THIS pci_mmioaddr = 0;
+  BX_CIRRUS_THIS pci_base_address[0] = 0;
+  BX_CIRRUS_THIS pci_base_address[1] = 0;
+  BX_CIRRUS_THIS pci_rom_address = 0;
+  BX_CIRRUS_THIS load_pci_rom(SIM->get_param_string(BXPN_VGA_ROM_PATH)->getptr());
 }
 
 Bit32u bx_svga_cirrus_c::pci_read_handler(Bit8u address, unsigned io_len)
@@ -2368,12 +2435,19 @@ void bx_svga_cirrus_c::pci_write_handler(Bit8u address, Bit32u value, unsigned i
   Bit8u new_value, old_value;
   bx_bool baseaddr0_change = 0;
   bx_bool baseaddr1_change = 0;
+  bx_bool romaddr_change = 0;
 
   BX_DEBUG(("pci_write: address 0x%02x, io_len 0x%02x, value 0x%x",
     (unsigned)address, (unsigned)io_len, (unsigned)value));
 
-  if ((address > 0x17) && (address < 0x34))
+  if ((address > 0x17) && (address < 0x30))
     return;
+
+  if (address == 0x30) {
+    value = value & 0xfffffc01;
+    romaddr_change = 1;
+  }
+
   for (i = 0; i < io_len; i++) {
     write_addr = address + i;
     old_value = BX_CIRRUS_THIS pci_conf[write_addr];
@@ -2421,19 +2495,28 @@ void bx_svga_cirrus_c::pci_write_handler(Bit8u address, Bit32u value, unsigned i
   if (baseaddr0_change) {
     if (DEV_pci_set_base_mem(BX_CIRRUS_THIS_PTR, cirrus_mem_read_handler,
                              cirrus_mem_write_handler,
-                             &BX_CIRRUS_THIS pci_memaddr,
+                             &BX_CIRRUS_THIS pci_base_address[0],
                              &BX_CIRRUS_THIS pci_conf[0x10],
                              0x2000000)) {
-      BX_INFO(("new pci_memaddr: 0x%04x", BX_CIRRUS_THIS pci_memaddr));
+      BX_INFO(("new pci_memaddr: 0x%04x", BX_CIRRUS_THIS pci_base_address[0]));
     }
   }
   if (baseaddr1_change) {
     if (DEV_pci_set_base_mem(BX_CIRRUS_THIS_PTR, cirrus_mem_read_handler,
                              cirrus_mem_write_handler,
-                             &BX_CIRRUS_THIS pci_mmioaddr,
+                             &BX_CIRRUS_THIS pci_base_address[1],
                              &BX_CIRRUS_THIS pci_conf[0x14],
                              CIRRUS_PNPMMIO_SIZE)) {
-      BX_INFO(("new pci_mmioaddr = 0x%08x", BX_CIRRUS_THIS pci_mmioaddr));
+      BX_INFO(("new pci_mmioaddr = 0x%08x", BX_CIRRUS_THIS pci_base_address[1]));
+    }
+  }
+  if (romaddr_change) {
+    if (DEV_pci_set_base_mem(BX_CIRRUS_THIS_PTR, cirrus_mem_read_handler,
+                             cirrus_mem_write_handler,
+                             &BX_CIRRUS_THIS pci_rom_address,
+                             &BX_CIRRUS_THIS pci_conf[0x30],
+                             BX_CIRRUS_THIS pci_rom_size)) {
+      BX_INFO(("new ROM address: 0x%08x", BX_CIRRUS_THIS pci_rom_address));
     }
   }
 }
@@ -2471,7 +2554,7 @@ void bx_svga_cirrus_c::svga_bitblt()
   ReadHostWordFromLittleEndian(&BX_CIRRUS_THIS control.reg[0x20],tmp16);
   BX_CIRRUS_THIS bitblt.bltwidth = ((int)tmp16 & (int)0x1fff) + 1;
   ReadHostWordFromLittleEndian(&BX_CIRRUS_THIS control.reg[0x22],tmp16);
-  BX_CIRRUS_THIS bitblt.bltheight = ((int)tmp16 & (int)0x1fff) + 1;
+  BX_CIRRUS_THIS bitblt.bltheight = ((int)tmp16 & (int)0x07ff) + 1;
   ReadHostWordFromLittleEndian(&BX_CIRRUS_THIS control.reg[0x24],tmp16);
   BX_CIRRUS_THIS bitblt.dstpitch = (int)tmp16 & (int)0x1fff;
   ReadHostWordFromLittleEndian(&BX_CIRRUS_THIS control.reg[0x26],tmp16);
@@ -2863,17 +2946,13 @@ void bx_svga_cirrus_c::svga_patterncopy()
   }
   if (BX_CIRRUS_THIS bitblt.bltmode & CIRRUS_BLTMODE_COLOREXPAND) {
     if (BX_CIRRUS_THIS bitblt.bltmode & CIRRUS_BLTMODE_TRANSPARENTCOMP) {
+      color[0] = BX_CIRRUS_THIS control.shadow_reg1;
+      color[1] = BX_CIRRUS_THIS control.reg[0x11];
+      color[2] = BX_CIRRUS_THIS control.reg[0x13];
+      color[3] = BX_CIRRUS_THIS control.reg[0x15];
       if (BX_CIRRUS_THIS bitblt.bltmodeext & CIRRUS_BLTMODEEXT_COLOREXPINV) {
-        color[0] = BX_CIRRUS_THIS control.shadow_reg0;
-        color[1] = BX_CIRRUS_THIS control.reg[0x10];
-        color[2] = BX_CIRRUS_THIS control.reg[0x12];
-        color[3] = BX_CIRRUS_THIS control.reg[0x14];
         bits_xor = 0xff;
       } else {
-        color[0] = BX_CIRRUS_THIS control.shadow_reg1;
-        color[1] = BX_CIRRUS_THIS control.reg[0x11];
-        color[2] = BX_CIRRUS_THIS control.reg[0x13];
-        color[3] = BX_CIRRUS_THIS control.reg[0x15];
         bits_xor = 0x00;
       }
 
@@ -2949,17 +3028,13 @@ void bx_svga_cirrus_c::svga_simplebitblt()
   }
   if (BX_CIRRUS_THIS bitblt.bltmode & CIRRUS_BLTMODE_COLOREXPAND) {
     if (BX_CIRRUS_THIS bitblt.bltmode & CIRRUS_BLTMODE_TRANSPARENTCOMP) {
+      color[0] = BX_CIRRUS_THIS control.shadow_reg1;
+      color[1] = BX_CIRRUS_THIS control.reg[0x11];
+      color[2] = BX_CIRRUS_THIS control.reg[0x13];
+      color[3] = BX_CIRRUS_THIS control.reg[0x15];
       if (BX_CIRRUS_THIS bitblt.bltmodeext & CIRRUS_BLTMODEEXT_COLOREXPINV) {
-        color[0] = BX_CIRRUS_THIS control.shadow_reg0;
-        color[1] = BX_CIRRUS_THIS control.reg[0x10];
-        color[2] = BX_CIRRUS_THIS control.reg[0x12];
-        color[3] = BX_CIRRUS_THIS control.reg[0x14];
         bits_xor = 0xff;
       } else {
-        color[0] = BX_CIRRUS_THIS control.shadow_reg1;
-        color[1] = BX_CIRRUS_THIS control.reg[0x11];
-        color[2] = BX_CIRRUS_THIS control.reg[0x13];
-        color[3] = BX_CIRRUS_THIS control.reg[0x15];
         bits_xor = 0x00;
       }
 
@@ -3099,23 +3174,19 @@ void bx_svga_cirrus_c::svga_colorexpand_transp_memsrc()
     srcskipleft = BX_CIRRUS_THIS control.reg[0x2f] & 0x07;
     pattern_x = srcskipleft * BX_CIRRUS_THIS bitblt.pixelwidth;
   }
+  color[0] = BX_CIRRUS_THIS control.shadow_reg1;
+  color[1] = BX_CIRRUS_THIS control.reg[0x11];
+  color[2] = BX_CIRRUS_THIS control.reg[0x13];
+  color[3] = BX_CIRRUS_THIS control.reg[0x15];
   if (BX_CIRRUS_THIS bitblt.bltmodeext & CIRRUS_BLTMODEEXT_COLOREXPINV) {
-    color[0] = BX_CIRRUS_THIS control.shadow_reg0;
-    color[1] = BX_CIRRUS_THIS control.reg[0x10];
-    color[2] = BX_CIRRUS_THIS control.reg[0x12];
-    color[3] = BX_CIRRUS_THIS control.reg[0x14];
     bits_xor = 0xff;
   } else {
-    color[0] = BX_CIRRUS_THIS control.shadow_reg1;
-    color[1] = BX_CIRRUS_THIS control.reg[0x11];
-    color[2] = BX_CIRRUS_THIS control.reg[0x13];
-    color[3] = BX_CIRRUS_THIS control.reg[0x15];
     bits_xor = 0x00;
   }
 
   dst = BX_CIRRUS_THIS bitblt.dst + pattern_x;
   bitmask = 0x80 >> srcskipleft;
-  bits = *src++;
+  bits = *src++ ^ bits_xor;
   for (x = pattern_x; x < BX_CIRRUS_THIS bitblt.bltwidth; x+=BX_CIRRUS_THIS bitblt.pixelwidth) {
     if ((bitmask & 0xff) == 0) {
       bitmask = 0x80;
@@ -3130,7 +3201,7 @@ void bx_svga_cirrus_c::svga_colorexpand_transp_memsrc()
   }
 }
 
-  bx_bool // true if finished, false otherwise
+  bx_bool // 1 if finished, 0 otherwise
 bx_svga_cirrus_c::svga_asyncbitblt_next()
 {
   int count;
@@ -3171,11 +3242,11 @@ bx_svga_cirrus_c::svga_asyncbitblt_next()
     }
   }
 
-  return false;
+  return 0;
 
 cleanup:
   svga_reset_bitblt();
-  return true;
+  return 1;
 }
 
 /////////////////////////////////////////////////////////////////////////

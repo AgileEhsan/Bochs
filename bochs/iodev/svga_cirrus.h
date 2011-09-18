@@ -70,14 +70,17 @@ public:
   bx_svga_cirrus_c();
   virtual ~bx_svga_cirrus_c();
 
-  virtual void init(void);
+  virtual void init_vga_extension(void);
   virtual void reset(unsigned type);
   virtual void redraw_area(unsigned x0, unsigned y0,
                            unsigned width, unsigned height);
   virtual Bit8u mem_read(bx_phy_address addr);
   virtual void mem_write(bx_phy_address addr, Bit8u value);
+  virtual int  get_snapshot_mode(void);
   virtual void get_text_snapshot(Bit8u **text_snapshot,
                                  unsigned *txHeight, unsigned *txWidth);
+  virtual Bit32u get_gfx_snapshot(Bit8u **snapshot_ptr, Bit8u **palette_ptr,
+                                  unsigned *iHeight, unsigned *iWidth, unsigned *iDepth);
   virtual void trigger_timer(void *this_ptr);
   virtual Bit8u get_actl_palette_idx(Bit8u index);
   virtual void register_state(void);
@@ -212,9 +215,6 @@ private:
   Bit32u bank_base[2];
   Bit32u bank_limit[2];
   Bit8u *disp_ptr;
-#if BX_SUPPORT_PCI
-  bx_bool pci_enabled;
-#endif
 
   struct {
     bx_cirrus_bitblt_rop_t rop_handler;
@@ -263,10 +263,6 @@ private:
 
   BX_CIRRUS_SMF bx_bool cirrus_mem_read_handler(bx_phy_address addr, unsigned len, void *data, void *param);
   BX_CIRRUS_SMF bx_bool cirrus_mem_write_handler(bx_phy_address addr, unsigned len, void *data, void *param);
-
-  Bit8u  pci_conf[256];
-  Bit32u pci_memaddr;
-  Bit32u pci_mmioaddr;
 #endif
 };
 

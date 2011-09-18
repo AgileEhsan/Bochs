@@ -4,7 +4,6 @@
 
 ./configure \
   --enable-smp \
-  --enable-x2apic \
   --enable-x86-64 \
   --enable-all-optimizations \
   --enable-long-phy-address \
@@ -18,20 +17,22 @@
   --enable-3dnow \
   --enable-monitor-mwait \
   --enable-vmx \
+  --enable-avx \
   --enable-x86-debugger \
   --enable-a20-pin \
   --enable-instrumentation=instrument/example1 \
   --enable-ne2000 \
   --enable-pci \
-  --enable-acpi \
   --enable-clgd54xx \
   --enable-usb \
   --enable-usb-ohci \
+  --enable-usb-xhci \
   --enable-cdrom \
   --enable-sb16 \
   --enable-es1370 \
   --enable-gameport \
   --enable-iodebug \
+  --enable-large-ramfile \
   --enable-gdb-stub \
   --enable-show-ips \
   --with-all-libs

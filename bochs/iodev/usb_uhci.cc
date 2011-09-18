@@ -102,10 +102,10 @@ void bx_usb_uhci_c::init(void)
                             "Experimental USB UHCI");
 
   for (i=0; i<256; i++) {
-    BX_UHCI_THIS hub.pci_conf[i] = 0x0;
+    BX_UHCI_THIS pci_conf[i] = 0x0;
   }
 
-  BX_UHCI_THIS hub.base_ioaddr = 0x0;
+  BX_UHCI_THIS pci_base_address[4] = 0x0;
 
   //FIXME: for now, we want a status bar // hub zero, port zero
   BX_UHCI_THIS hub.statusbar_id = bx_gui->register_statusitem("UHCI");
@@ -136,6 +136,9 @@ void bx_usb_uhci_c::init(void)
       DEV_register_timer(this, iolight_timer_handler, 5000, 0,0, "UHCI i/o light");
   }
   BX_UHCI_THIS hub.iolight_counter = 0;
+
+  // register handler for correct device connect handling after runtime config
+  SIM->register_runtime_config_handler(BX_UHCI_THIS_PTR, runtime_config_handler);
   BX_UHCI_THIS hub.device_change = 0;
 
   BX_INFO(("USB UHCI initialized"));
@@ -172,7 +175,7 @@ void bx_usb_uhci_c::reset(unsigned type)
 
     };
     for (i = 0; i < sizeof(reset_vals) / sizeof(*reset_vals); ++i) {
-        BX_UHCI_THIS hub.pci_conf[reset_vals[i].addr] = reset_vals[i].val;
+        BX_UHCI_THIS pci_conf[reset_vals[i].addr] = reset_vals[i].val;
     }
   }
 
@@ -271,7 +274,7 @@ void bx_usb_uhci_c::register_state(void)
     // empty list for USB device state
     new bx_list_c(port, "device", 20);
   }
-  register_pci_state(hub, BX_UHCI_THIS hub.pci_conf);
+  register_pci_state(hub);
 
   new bx_shadow_bool_c(list, "busy", &BX_UHCI_THIS busy);
   new bx_shadow_num_c(list, "global_reset", &BX_UHCI_THIS global_reset);
@@ -280,11 +283,11 @@ void bx_usb_uhci_c::register_state(void)
 void bx_usb_uhci_c::after_restore_state(void)
 {
   if (DEV_pci_set_base_io(BX_UHCI_THIS_PTR, read_handler, write_handler,
-                         &BX_UHCI_THIS hub.base_ioaddr,
-                         &BX_UHCI_THIS hub.pci_conf[0x20],
+                         &BX_UHCI_THIS pci_base_address[4],
+                         &BX_UHCI_THIS pci_conf[0x20],
                          32, &uhci_iomask[0], "USB UHCI Hub"))
   {
-     BX_INFO(("new base address: 0x%04x", BX_UHCI_THIS hub.base_ioaddr));
+     BX_INFO(("new base address: 0x%04x", BX_UHCI_THIS pci_base_address[4]));
   }
   for (int j=0; j<BX_N_USB_UHCI_PORTS; j++) {
     if (BX_UHCI_THIS hub.usb_port[j].device != NULL) {
@@ -330,7 +333,7 @@ void bx_usb_uhci_c::remove_device(Bit8u port)
 
 void bx_usb_uhci_c::set_irq_level(bx_bool level)
 {
-  DEV_pci_set_irq(BX_UHCI_THIS hub.devfunc, BX_UHCI_THIS hub.pci_conf[0x3d], level);
+  DEV_pci_set_irq(BX_UHCI_THIS hub.devfunc, BX_UHCI_THIS pci_conf[0x3d], level);
 }
 
 // static IO port read callback handler
@@ -351,7 +354,7 @@ Bit32u bx_usb_uhci_c::read(Bit32u address, unsigned io_len)
   Bit32u val = 0x0;
   Bit8u  offset,port;
 
-  offset = address - BX_UHCI_THIS hub.base_ioaddr;
+  offset = address - BX_UHCI_THIS pci_base_address[4];
 
   switch (offset) {
     case 0x00: // command register (16-bit)
@@ -449,7 +452,7 @@ void bx_usb_uhci_c::write(Bit32u address, Bit32u value, unsigned io_len)
 
   BX_DEBUG(("register write to  address 0x%04X:  0x%08X (%2i bits)", (unsigned) address, (unsigned) value, io_len * 8));
 
-  offset = address - BX_UHCI_THIS hub.base_ioaddr;
+  offset = address - BX_UHCI_THIS pci_base_address[4];
 
   switch (offset) {
     case 0x00: // command register (16-bit) (R/W)
@@ -638,7 +641,6 @@ void bx_usb_uhci_c::usb_timer_handler(void *this_ptr)
 void bx_usb_uhci_c::usb_timer(void)
 {
   int i;
-  char pname[6];
 
   // If the "global reset" bit was set by software
   if (BX_UHCI_THIS global_reset) {
@@ -814,19 +816,6 @@ void bx_usb_uhci_c::usb_timer(void)
   //  If in Global_Suspend mode and any of usb_port[i] bits 6,3, or 1 are set,
   //    we need to issue a Global_Resume (set the global resume bit).
   //    However, since we don't do anything, let's not.
-
-  for (i = 0; i < BX_N_USB_UHCI_PORTS; i++) {
-    // forward timer tick
-    if (BX_UHCI_THIS hub.usb_port[i].device != NULL) {
-      BX_UHCI_THIS hub.usb_port[i].device->timer();
-    }
-    // device change support
-    if ((BX_UHCI_THIS hub.device_change & (1 << i)) != 0) {
-      sprintf(pname, "port%d", i + 1);
-      init_device(i, (bx_list_c*)SIM->get_param(pname, SIM->get_param(BXPN_USB_UHCI)));
-      BX_UHCI_THIS hub.device_change &= ~(1 << i);
-    }
-  }
 }
 
 bx_bool bx_usb_uhci_c::DoTransfer(Bit32u address, Bit32u queue_num, struct TD *td) {
@@ -961,13 +950,39 @@ void bx_usb_uhci_c::iolight_timer()
   }
  }
 
+void bx_usb_uhci_c::runtime_config_handler(void *this_ptr)
+{
+  bx_usb_uhci_c *class_ptr = (bx_usb_uhci_c *) this_ptr;
+  class_ptr->runtime_config();
+}
+
+void bx_usb_uhci_c::runtime_config(void)
+{
+  int i;
+  char pname[6];
+
+  for (i = 0; i < BX_N_USB_UHCI_PORTS; i++) {
+    // device change support
+    if ((BX_UHCI_THIS hub.device_change & (1 << i)) != 0) {
+      BX_INFO(("USB port #%d: device connect", i+1));
+      sprintf(pname, "port%d", i + 1);
+      init_device(i, (bx_list_c*)SIM->get_param(pname, SIM->get_param(BXPN_USB_UHCI)));
+      BX_UHCI_THIS hub.device_change &= ~(1 << i);
+    }
+    // forward to connected device
+    if (BX_UHCI_THIS hub.usb_port[i].device != NULL) {
+      BX_UHCI_THIS hub.usb_port[i].device->runtime_config();
+    }
+  }
+}
+
 // pci configuration space read callback handler
 Bit32u bx_usb_uhci_c::pci_read_handler(Bit8u address, unsigned io_len)
 {
   Bit32u value = 0;
 
   for (unsigned i=0; i<io_len; i++) {
-    value |= (BX_UHCI_THIS hub.pci_conf[address+i] << (i*8));
+    value |= (BX_UHCI_THIS pci_conf[address+i] << (i*8));
   }
 
   if (io_len == 1)
@@ -993,11 +1008,11 @@ void bx_usb_uhci_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_l
 
   for (unsigned i=0; i<io_len; i++) {
     value8 = (value >> (i*8)) & 0xFF;
-    oldval = BX_UHCI_THIS hub.pci_conf[address+i];
+    oldval = BX_UHCI_THIS pci_conf[address+i];
     switch (address+i) {
       case 0x04:
         value8 &= 0x05;
-        BX_UHCI_THIS hub.pci_conf[address+i] = value8;
+        BX_UHCI_THIS pci_conf[address+i] = value8;
         break;
       case 0x3d: //
       case 0x3e: //
@@ -1008,7 +1023,7 @@ void bx_usb_uhci_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_l
       case 0x3c:
         if (value8 != oldval) {
           BX_INFO(("new irq line = %d", value8));
-          BX_UHCI_THIS hub.pci_conf[address+i] = value8;
+          BX_UHCI_THIS pci_conf[address+i] = value8;
         }
         break;
       case 0x20:
@@ -1018,15 +1033,15 @@ void bx_usb_uhci_c::pci_write_handler(Bit8u address, Bit32u value, unsigned io_l
       case 0x23:
         baseaddr_change |= (value8 != oldval);
       default:
-        BX_UHCI_THIS hub.pci_conf[address+i] = value8;
+        BX_UHCI_THIS pci_conf[address+i] = value8;
     }
   }
   if (baseaddr_change) {
     if (DEV_pci_set_base_io(BX_UHCI_THIS_PTR, read_handler, write_handler,
-                            &BX_UHCI_THIS hub.base_ioaddr,
-                            &BX_UHCI_THIS hub.pci_conf[0x20],
+                            &BX_UHCI_THIS pci_base_address[4],
+                            &BX_UHCI_THIS pci_conf[0x20],
                             32, &uhci_iomask[0], "USB UHCI Hub")) {
-      BX_INFO(("new base address: 0x%04x", BX_UHCI_THIS hub.base_ioaddr));
+      BX_INFO(("new base address: 0x%04x", BX_UHCI_THIS pci_base_address[4]));
     }
   }
 
@@ -1100,8 +1115,8 @@ const char *bx_usb_uhci_c::usb_param_handler(bx_param_string_c *param, int set,
     portnum = atoi((param->get_parent())->get_name()+4) - 1;
     bx_bool empty = ((strlen(val) == 0) || (!strcmp(val, "none")));
     if ((portnum >= 0) && (portnum < BX_N_USB_UHCI_PORTS)) {
-      BX_INFO(("USB port #%d experimental device change", portnum+1));
       if (empty && BX_UHCI_THIS hub.usb_port[portnum].status) {
+        BX_INFO(("USB port #%d: device disconnect", portnum+1));
         if (BX_UHCI_THIS hub.usb_port[portnum].device != NULL) {
           type = BX_UHCI_THIS hub.usb_port[portnum].device->get_type();
         }
