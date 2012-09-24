@@ -257,7 +257,8 @@ typedef enum {
   BX_ASYNC_EVT_DBG_MSG,           // simulator -> CI
   BX_ASYNC_EVT_VALUE_CHANGED,     // simulator -> CI
   BX_ASYNC_EVT_TOOLBAR,           // CI -> simulator
-  BX_ASYNC_EVT_REFRESH            // simulator -> CI
+  BX_ASYNC_EVT_REFRESH,           // simulator -> CI
+  BX_ASYNC_EVT_QUIT_SIM           // simulator -> CI
 } BxEventType;
 
 typedef union {
@@ -294,14 +295,14 @@ typedef struct {
 // Event type: BX_ASYNC_EVT_MOUSE
 //
 // A mouse event can be sent from the VGA window to the Bochs
-// simulator.  It is asynchronous.  Currently unused because mouse
-// events aren't implemented in our wxWidgets code yet.
+// simulator.  It is asynchronous.
 typedef struct {
   // type is BX_EVT_MOUSE
-  Bit16s dx, dy;           // mouse motion delta
+  Bit16s dx, dy, dz;       // mouse motion delta
   Bit8u buttons;           // which buttons are pressed.
                            // bit 0: 1=left button down, 0=up
                            // bit 1: 1=right button down, 0=up
+                           // bit 2: 1=middle button down, 0=up
 } BxMouseEvent;
 
 // Event type: BX_SYNC_EVT_GET_PARAM, BX_ASYNC_EVT_SET_PARAM
@@ -706,6 +707,7 @@ public:
     is_sim_thread_func = func;
   }
   virtual bx_bool is_sim_thread() {return 1;}
+  virtual bx_bool is_wx_selected() const {return 0;}
   virtual void set_debug_gui(bx_bool val) {}
   virtual bx_bool has_debug_gui() const {return 0;}
   // provide interface to bx_gui->set_display_mode() method for config

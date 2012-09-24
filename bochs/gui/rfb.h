@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2000-2009  The Bochs Project
+//  Copyright (C) 2001-2012  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -73,8 +73,8 @@ typedef struct {
 #define rfbServerProtocolMajorVersion 3
 #define rfbServerProtocolMinorVersion 3
 
-typedef char rfbProtocolVersionMessage[12 + 1]; // Add 1 for null byte
-#define rfbProtocolVersionMessageSize (sizeof(rfbProtocolVersionMessage) - 1) // Real Message Length
+#define rfbProtocolVersionMessageSize 12
+typedef char rfbProtocolVersionMessage[rfbProtocolVersionMessageSize + 1]; // Add 1 for null byte
 
 
 #define rfbSecurityConnFailed 0

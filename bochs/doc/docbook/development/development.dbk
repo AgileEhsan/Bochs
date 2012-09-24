@@ -211,7 +211,11 @@ disassembler, tracer, instrumentation.
 <row><entry>gui/keymaps</entry><entry>keymaps for the keyboard mapping feature</entry></row>
 <row><entry>host</entry><entry>host specific drivers (currently only used by the pcidev kernel module for Linux)</entry></row>
 <row><entry>instrument</entry><entry>directory tree for the instrumentation feature</entry></row>
-<row><entry>iodev</entry><entry>standard PC devices, PCI devices, lowlevel networking and sound drivers</entry></row>
+<row><entry>iodev</entry><entry>standard PC devices, PCI core devices</entry></row>
+<row><entry>iodev/hdimage</entry><entry>support for different disk image types and lowlevel cdrom access</entry></row>
+<row><entry>iodev/networking</entry><entry>networking devices and lowlevel modules</entry></row>
+<row><entry>iodev/sound</entry><entry>sound devices and lowlevel modules</entry></row>
+<row><entry>iodev/usb</entry><entry>USB HCs and pluggable devices</entry></row>
 <row><entry>memory</entry><entry>memory management and ROM loader</entry></row>
 <row><entry>misc</entry><entry>useful utilities (e.g. bximage, bxcommit, niclist)</entry></row>
 <row><entry>misc/sb16</entry><entry>tool to control the SB16 emulation from the guest side</entry></row>
@@ -2211,8 +2215,8 @@ Check date, update/sumup info in CHANGES. Run autoconf to regenerate configure a
 Create an SVN tag that contains all files of the revision that was used in the release.
 For prereleases I create a normal SVN tag like this:
 <screen>
-  svn mkdir tags/REL_2_5_pre1
-  svn copy trunk/bochs tags/REL_2_5_pre1/bochs
+  svn mkdir tags/REL_2_5_pre1_FINAL
+  svn copy trunk/bochs tags/REL_2_5_pre1_FINAL/bochs
   svn commit
 </screen>
 But for a real release, I make an SVN branch tag AND a normal tag.
@@ -2246,10 +2250,11 @@ In Cygwin:
   sh .conf.win32-vcpp         # runs configure
   make win32_snap             # unzip workspace, make a win32 source ZIP
 </screen>
-Copy the source ZIP to a windows machine, if necessary.
+The source ZIP is now ready for upload. To build the binary package, copy it to
+a windows machine, if necessary.
 </para>
 <para>
-Open up Visual C++ and load the workspace file Bochs.dsw.  Check
+Open up Visual C++ and load the workspace file Bochs.sln.  Check
 the Build:Set Active Project Configuration is set the way you want it.
 For releases I use "Win32 Release".
 </para>
@@ -2283,10 +2288,10 @@ cd doc/docbook; touch */*.html
 </screen>
 Do make install_win32 into /tmp or someplace:
 <screen>
-make install_win32 prefix=/tmp/bochs-2.4
+make install_win32 prefix=/tmp/bochs-2.5
 </screen>
-This copies all the files into /tmp/bochs-2.4 and then creates a
-binary ZIP at /tmp/bochs-2.4.zip. Rename that bochs-2.4.win32-bin.zip.
+This copies all the files into /tmp/bochs-2.5 and then creates a
+binary ZIP at /tmp/bochs-2.5.zip. Rename that bochs-2.5.win32-bin.zip.
 </para>
 <para>
 Now make the NSIS installer package (the current script is known to work with NSIS 2.44)
@@ -2296,10 +2301,10 @@ cd build/win32/nsis
 Unzip the binary ZIP file into bochs-$VERSION (must match Makefile) and
 then run make.
 <screen>
-unzip ~/bochs-2.4.zip
+unzip ~/bochs-2.5.zip
 make
 </screen>
-That gives an installer called <filename>Bochs-2.4.exe</filename>. Test and upload it.
+That gives an installer called <filename>Bochs-2.5.exe</filename>. Test and upload it.
 </para>
 </section>
 <section><title>Building the release on Linux</title>
@@ -2308,10 +2313,10 @@ Do a clean SVN checkout from the release tag and specify a not yet existing
 directory name with the version number as the destination. Then create the
 source package from this new directory.
 <screen>
-  svn co https://bochs.svn.sourceforge.net/svnroot/bochs/tags/REL_2_4_FINAL/bochs bochs-2.4
-  tar czvf bochs-2.4.tar.gz --exclude=.svn bochs-2.4
+  svn co https://bochs.svn.sourceforge.net/svnroot/bochs/tags/REL_2_5_FINAL/bochs bochs-2.5
+  tar czvf bochs-2.5.tar.gz --exclude=.svn bochs-2.5
 </screen>
-The source TAR file bochs-2.4.tar.gz is ready to upload.
+The source TAR file bochs-2.5.tar.gz is ready for upload.
 </para>
 <para>
 The RPM will be building using the configuration in .conf.linux with
@@ -2332,6 +2337,11 @@ the <filename>bochs</filename> directory. Point the download destination to the
 new directory and start uploading packages. The top of the <filename>CHANGES</filename>
 file should be used as the release notes. After setting up the file properties the
 new release is ready for download.
+</para>
+<para>
+After having all files set up in the download area, don't forget to post an announcement
+containing a brief summary of changes to the bochs-announce mailing list and the "Project
+News" section on SF.
 </para>
 </section>
 

@@ -37,7 +37,7 @@ static unsigned iCacheMisses=0;
     BX_INFO(("ICACHE lookups: %u, misses: %u, hit rate = %6.2f%% ", \
           iCacheLookups, \
           iCacheMisses,  \
-          (iCacheLookups-iCacheMisses) * 100.0 / iCacheLookups)); \
+          (iCacheLookups-iCacheMisses) * 100.0f / iCacheLookups)); \
     iCacheLookups = iCacheMisses = 0; \
   } \
 }
@@ -103,7 +103,7 @@ void BX_CPU_C::cpu_loop(void)
       BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
       RIP += i->ilen();
       // when handlers chaining is enabled this single call will execute entire trace
-      BX_CPU_CALL_METHOD(i->execute, (i)); // might iterate repeat instruction
+      BX_CPU_CALL_METHOD(i->execute1, (i)); // might iterate repeat instruction
 
       BX_SYNC_TIME_IF_SINGLE_PROCESSOR(0);
 
@@ -125,7 +125,7 @@ void BX_CPU_C::cpu_loop(void)
       // want to allow changing of the instruction inside instrumentation callback
       BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
       RIP += i->ilen();
-      BX_CPU_CALL_METHOD(i->execute, (i)); // might iterate repeat instruction
+      BX_CPU_CALL_METHOD(i->execute1, (i)); // might iterate repeat instruction
       BX_CPU_THIS_PTR prev_rip = RIP; // commit new RIP
       BX_INSTR_AFTER_EXECUTION(BX_CPU_ID, i);
       BX_CPU_THIS_PTR icount++;
@@ -180,7 +180,7 @@ void BX_CPU_C::cpu_run_trace(void)
   BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
   RIP += i->ilen();
   // when handlers chaining is enabled this single call will execute entire trace
-  BX_CPU_CALL_METHOD(i->execute, (i)); // might iterate repeat instruction
+  BX_CPU_CALL_METHOD(i->execute1, (i)); // might iterate repeat instruction
 
   if (BX_CPU_THIS_PTR async_event) {
     // clear stop trace magic indication that probably was set by repeat or branch32/64
@@ -193,7 +193,7 @@ void BX_CPU_C::cpu_run_trace(void)
     // want to allow changing of the instruction inside instrumentation callback
     BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, i);
     RIP += i->ilen();
-    BX_CPU_CALL_METHOD(i->execute, (i)); // might iterate repeat instruction
+    BX_CPU_CALL_METHOD(i->execute1, (i)); // might iterate repeat instruction
     BX_CPU_THIS_PTR prev_rip = RIP; // commit new RIP
     BX_INSTR_AFTER_EXECUTION(BX_CPU_ID, i);
     BX_CPU_THIS_PTR icount++;
@@ -220,13 +220,13 @@ bxICacheEntry_c* BX_CPU_C::getICacheEntry(void)
     eipBiased = RIP + BX_CPU_THIS_PTR eipPageBias;
   }
 
-  bx_phy_address pAddr = BX_CPU_THIS_PTR pAddrFetchPage + eipBiased;
-  bxICacheEntry_c *entry = BX_CPU_THIS_PTR iCache.get_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
-
   InstrICache_Increment(iCacheLookups);
   InstrICache_Stats();
 
-  if (entry->pAddr != pAddr)
+  bx_phy_address pAddr = BX_CPU_THIS_PTR pAddrFetchPage + eipBiased;
+  bxICacheEntry_c *entry = BX_CPU_THIS_PTR iCache.find_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
+
+  if (entry == NULL)
   {
     // iCache miss. No validated instruction with matching fetch parameters
     // is in the iCache.
@@ -236,6 +236,59 @@ bxICacheEntry_c* BX_CPU_C::getICacheEntry(void)
 
   return entry;
 }
+
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+
+// The function is called after taken branch instructions and tries to link the branch to the next trace
+BX_INSF_TYPE BX_CPP_AttrRegparmN(1) BX_CPU_C::linkTrace(bxInstruction_c *i)
+{
+#if BX_SUPPORT_SMP
+  if (BX_SMP_PROCESSORS > 1)
+    return;
+#endif
+
+  if (BX_CPU_THIS_PTR async_event) return;
+
+  Bit32u delta = BX_CPU_THIS_PTR icount - BX_CPU_THIS_PTR icount_last_sync;
+  if(delta >= bx_pc_system.getNumCpuTicksLeftNextEvent())
+    return;
+
+  bxInstruction_c *next = i->getNextTrace();
+  if (next) {
+    BX_EXECUTE_INSTRUCTION(next);
+    return;
+  }
+
+  bx_address eipBiased = EIP + BX_CPU_THIS_PTR eipPageBias;
+  if (eipBiased >= BX_CPU_THIS_PTR eipPageWindowSize) {
+/*
+    prefetch();
+    eipBiased = RIP + BX_CPU_THIS_PTR eipPageBias;
+*/
+    // You would like to have the prefetch() instead of this return; statement and link also
+    // branches that cross page boundary but this potentially could cause functional failure.
+    // An OS might modify the page tables and invalidate the TLB but it won't affect Bochs
+    // execution because of a trace linked into another old trace with data before the page
+    // invalidation. The case would be detected if doing prefetch() properly.
+
+    return;
+  }
+
+  InstrICache_Increment(iCacheLookups);
+  InstrICache_Stats();
+
+  bx_phy_address pAddr = BX_CPU_THIS_PTR pAddrFetchPage + eipBiased;
+  bxICacheEntry_c *entry = BX_CPU_THIS_PTR iCache.find_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
+
+  if (entry != NULL) // link traces - handle only hit cases
+  {
+    i->setNextTrace(entry->i);
+    i = entry->i;
+    BX_EXECUTE_INSTRUCTION(i);
+  }
+}
+
+#endif
 
 #define BX_REPEAT_TIME_UPDATE_INTERVAL (BX_MAX_TRACE_LENGTH-1)
 

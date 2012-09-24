@@ -1,13 +1,34 @@
-Changes in 2.6 (not yet released):
+Changes in 2.6 (September 2, 2012):
+
+Brief summary :
+- More than 10% CPU emulation speedup !
+- Support for AMD's SVM hardware emulation (including extended XAPIC support).
+- Implemented support for new x86 ISA extensions.
+  Bochs is fully aligned with rev043 of Intel(R) Architecture Manual.
+- Improved emulation accuracy (critical fixes for APIC, VMX and AVX/XOP emulation).
+- Bochs internal debugger: new command to show state of a device from the debugger.
+- ROM BIOS: improved PCI boot ROM support (for VGA and other devices)
+- Networking:
+    - Ported Intel(R) 82540EM Gigabit Ethernet adapter emulation from Qemu.
+    - Added PCI network boot ROM support to all network adapters.
+    - Added TFTP support to the 'slirp' networking module.
+- Harddrive: added support for VirtualPC disk images, fixed sparse disk images.
+- Sound:
+    - implemented PC speaker beep using the lowlevel sound interface.
+    - SDL audio output support.
+- Added ability to set log action per device from .bochsrc.
+- Moved disk imaging, networking, sound and USB devices to subdirectories
+  in the iodev folder.
+
+Detailed change log :
 
 - CPU
   - Implemented EPT A/D extensions support.
-    Bochs is fully aligned with the latest published revision of
-    Intel Architecture Manual (revision 043) now.
+    Bochs is fully aligned with rev043 of the of Intel(R) Architecture Manual.
   - Implemented ADX (ADCX/ADOX) instructions support, the feature can
     be enabled using .bochsrc CPUID option.
-  - Another 10% CPU emulation speedup with even more optimal lazy flags
-    handling and stack access optimizations
+  - More than 10% CPU emulation speedup with even more optimal lazy flags
+    handling, stack access optimizations and cross branch trace linking.
   - Support for AMD's SVM hardware emulation in Bochs CPU, to enable
     configure with --enable-svm option
   - Implemented AMD Extended XAPIC support, to enable set .bochsrc CPU
@@ -17,7 +38,7 @@ Changes in 2.6 (not yet released):
   ! Added AMD Phenom X3 8650 (Toliman) configuration to the CPUDB
   ! Added Corei7 3770K (Ivy Bridge) configuration to the CPUDB
   - Bugfixes for CPU emulation correctness and stability
-    (critical fixes in APIC/X2APIC, VMX and AVX/XOP emulation)
+    (critical fixes for APIC/X2APIC, VMX and AVX/XOP emulation)
 
 - Bochs Debugger and Instrumentation
   - Implemented new debugger command 'info device [string]' that shows the
@@ -91,10 +112,12 @@ Changes in 2.6 (not yet released):
 
 - GUI and display libraries
   - implemented "auto-off" timer for status LEDs indicating a data transfer
-  - Implemented "hideIPS" option in sdl and wx libraries
   - Added support for sending absolute mouse position values from the gui if an
     absolute pointing device (USB tablet) is active (rfb, sdl, win32, wx, x).
   - Gui debugger now supported when using sdl gui on Windows
+  - Implemented "hideIPS" option in rfb, sdl, win32 and wx libraries
+  - wx: fixed random freezes with wxGTK and "show ips" feature enabled
+  - rfb: the "show ips" feature now works on Windows host
 
 - Tools
   - bxcommit: added support for converting growing to flat mode images
@@ -112,6 +135,8 @@ Changes in 2.6 (not yet released):
   [3486555] Fix critical stack leak in Win32 GUI by Carlo Bramini
 
 - these S.F. bugs were closed/fixed
+  [625877]  wx: power button -> thread deadlock
+  [3534063] Configure does not check for flex presence
   [3555237] NE2000 doesn't compile on OS/X
   [3553168] X doesn't build in latest code on OS/X
   [3550175] Crash when saving snapshot to directory instead of file

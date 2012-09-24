@@ -2,6 +2,10 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
+//  USB mass storage device support (ported from QEMU)
+//
+//  Copyright (c) 2006 CodeSourcery.
+//  Written by Paul Brook
 //  Copyright (C) 2009-2012  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
@@ -18,8 +22,6 @@
 //  License along with this library; if not, write to the Free Software
 //  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 /////////////////////////////////////////////////////////////////////////
-
-// USB mass storage device support ported from the Qemu project
 
 // Define BX_PLUGGABLE in files that can be compiled into plugins.  For
 // platforms that require a special tag on exported symbols, BX_PLUGGABLE
@@ -255,6 +257,9 @@ const char* usb_msd_device_c::get_info()
 void usb_msd_device_c::register_state_specific(bx_list_c *parent)
 {
   s.sr_list = new bx_list_c(parent, "s", "USB MSD Device State");
+  if ((d.type == USB_DEV_TYPE_DISK) && (s.hdimage != NULL)) {
+    s.hdimage->register_state(s.sr_list);
+  }
   new bx_shadow_num_c(s.sr_list, "mode", &s.mode);
   new bx_shadow_num_c(s.sr_list, "scsi_len", &s.scsi_len);
   new bx_shadow_num_c(s.sr_list, "usb_len", &s.usb_len);

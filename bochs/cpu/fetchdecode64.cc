@@ -405,7 +405,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 06 /w */ { BxTraceEnd, BX_IA_CLTS },
   /* 0F 07 /w */ { BxTraceEnd, BX_IA_SYSRET },
   /* 0F 08 /w */ { BxTraceEnd, BX_IA_INVD },
-  /* 0F 09 /w */ { BxTraceEnd, BX_IA_WBINVD },
+  /* 0F 09 /w */ { 0, BX_IA_WBINVD },
   /* 0F 0A /w */ { 0, BX_IA_ERROR },
   /* 0F 0B /w */ { BxTraceEnd, BX_IA_UD2A },
   /* 0F 0C /w */ { 0, BX_IA_ERROR },
@@ -920,7 +920,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 06 /d */ { BxTraceEnd, BX_IA_CLTS },
   /* 0F 07 /d */ { BxTraceEnd, BX_IA_SYSRET },
   /* 0F 08 /d */ { BxTraceEnd, BX_IA_INVD },
-  /* 0F 09 /d */ { BxTraceEnd, BX_IA_WBINVD },
+  /* 0F 09 /d */ { 0, BX_IA_WBINVD },
   /* 0F 0A /d */ { 0, BX_IA_ERROR },
   /* 0F 0B /d */ { BxTraceEnd, BX_IA_UD2A },
   /* 0F 0C /d */ { 0, BX_IA_ERROR },
@@ -1435,7 +1435,7 @@ static const BxOpcodeInfo_t BxOpcodeInfo64[512*3] = {
   /* 0F 06 /q */ { BxTraceEnd, BX_IA_CLTS },
   /* 0F 07 /q */ { BxTraceEnd, BX_IA_SYSRET },
   /* 0F 08 /q */ { BxTraceEnd, BX_IA_INVD },
-  /* 0F 09 /q */ { BxTraceEnd, BX_IA_WBINVD },
+  /* 0F 09 /q */ { 0, BX_IA_WBINVD },
   /* 0F 0A /q */ { 0, BX_IA_ERROR },
   /* 0F 0B /q */ { BxTraceEnd, BX_IA_UD2A },
   /* 0F 0C /q */ { 0, BX_IA_ERROR },
@@ -1703,9 +1703,8 @@ BX_CPU_C::fetchDecode64(const Bit8u *iptr, bxInstruction_c *i, unsigned remainin
   unsigned sse_prefix = SSE_PREFIX_NONE;
   unsigned rex_prefix = 0;
 
-  int vvv = -1;
 #if BX_SUPPORT_AVX
-  int had_vex = 0, had_xop = 0, use_vvv = 0;
+  int had_vex = 0, had_xop = 0, use_vvv = 0, vvv = -1;
   bx_bool vex_w = 0, vex_l = 0;
 #endif
 
@@ -2383,36 +2382,36 @@ modrm_done:
 #endif
 
   if (mod_mem) {
-    i->execute  = BxOpcodesTable[ia_opcode].execute1;
-    i->execute2 = BxOpcodesTable[ia_opcode].execute2;
+    i->execute1 = BxOpcodesTable[ia_opcode].execute1;
+    i->handlers.execute2 = BxOpcodesTable[ia_opcode].execute2;
 
     if (ia_opcode == BX_IA_MOV_GqEq) {
       if (seg == BX_SEG_REG_SS)
-        i->execute = &BX_CPU_C::MOV64S_GqEqM;
+        i->execute1 = &BX_CPU_C::MOV64S_GqEqM;
     }
     if (ia_opcode == BX_IA_MOV32_EdGd) {
       if (seg == BX_SEG_REG_SS)
-        i->execute = &BX_CPU_C::MOV64S_EqGqM;
+        i->execute1 = &BX_CPU_C::MOV64S_EqGqM;
     }
   }
   else {
-    i->execute  = BxOpcodesTable[ia_opcode].execute2;
-    i->execute2 = NULL;
+    i->execute1 = BxOpcodesTable[ia_opcode].execute2;
+    i->handlers.execute2 = NULL;
   }
 
-  BX_ASSERT(i->execute);
+  BX_ASSERT(i->execute1);
 
   Bit32u op_flags = BxOpcodesTable[ia_opcode].src[3];
   if (! BX_CPU_THIS_PTR sse_ok) {
      if (op_flags & BX_PREPARE_SSE) {
-        if (i->execute != &BX_CPU_C::BxError) i->execute = &BX_CPU_C::BxNoSSE;
+        if (i->execute1 != &BX_CPU_C::BxError) i->execute1 = &BX_CPU_C::BxNoSSE;
         return(1);
      }
   }
 #if BX_SUPPORT_AVX
   if (! BX_CPU_THIS_PTR avx_ok) {
     if (op_flags & BX_PREPARE_AVX) {
-       if (i->execute != &BX_CPU_C::BxError) i->execute = &BX_CPU_C::BxNoAVX;
+       if (i->execute1 != &BX_CPU_C::BxError) i->execute1 = &BX_CPU_C::BxNoAVX;
        return(1);
     }
   }

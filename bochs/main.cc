@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2001-2011  The Bochs Project
+//  Copyright (C) 2001-2012  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -579,6 +579,9 @@ int bx_init_main(int argc, char *argv[])
 #if BX_SUPPORT_CLGD54XX
           fprintf(stderr, "cirrus\n");
 #endif
+#if BX_SUPPORT_VOODOO
+          fprintf(stderr, "voodoo\n");
+#endif
 #if BX_SUPPORT_PCI
           fprintf(stderr, "pci\n");
 #endif
@@ -808,6 +811,7 @@ int bx_init_main(int argc, char *argv[])
   }
   // load pre-defined optional plugins before parsing configuration
   SIM->opt_plugin_ctrl("*", 1);
+  SIM->init_save_restore();
   if (load_rcfile) {
     // parse configuration file and command line arguments
 #ifdef WIN32
@@ -942,7 +946,6 @@ bx_bool load_and_init_display_lib(void)
 
 int bx_begin_simulation (int argc, char *argv[])
 {
-  SIM->init_save_restore();
   if (SIM->get_param_bool(BXPN_RESTORE_FLAG)->get()) {
     if (!SIM->restore_config()) {
       BX_PANIC(("cannot restore configuration"));
@@ -1245,7 +1248,8 @@ void bx_init_hardware()
     SIM->get_param_bool(BXPN_I440FX_SUPPORT)->get() ? "yes" : "no"));
   BX_INFO(("  SB16 support: %s", BX_SUPPORT_SB16?"yes":"no"));
   BX_INFO(("  USB support: %s", BX_SUPPORT_PCIUSB?"yes":"no"));
-  BX_INFO(("  VGA extension support: vbe %s", BX_SUPPORT_CLGD54XX?"cirrus":""));
+  BX_INFO(("  VGA extension support: vbe%s%s", BX_SUPPORT_CLGD54XX?" cirrus":"",
+    BX_SUPPORT_VOODOO?" voodoo":""));
 
   // Check if there is a romimage
   if (strcmp(SIM->get_param_string(BXPN_ROM_PATH)->getptr(),"") == 0) {
@@ -1352,8 +1356,10 @@ void bx_init_hardware()
 
 #if BX_SHOW_IPS
 #if !defined(WIN32)
-  signal(SIGALRM, bx_signal_handler);
-  alarm(1);
+  if (!SIM->is_wx_selected()) {
+    signal(SIGALRM, bx_signal_handler);
+    alarm(1);
+  }
 #endif
 #endif
 }
@@ -1396,8 +1402,10 @@ int bx_atexit(void)
 
 #if BX_SHOW_IPS
 #if !defined(__MINGW32__) && !defined(_MSC_VER)
-  alarm(0);
-  signal(SIGALRM, SIG_DFL);
+  if (!SIM->is_wx_selected()) {
+    alarm(0);
+    signal(SIGALRM, SIG_DFL);
+  }
 #endif
 #endif
 
@@ -1406,6 +1414,28 @@ int bx_atexit(void)
 
   return 0;
 }
+
+#if BX_SHOW_IPS
+void bx_show_ips_handler(void)
+{
+  static Bit64u ticks_count = 0;
+  static Bit64u counts = 0;
+
+  // amount of system ticks passed from last time the handler was called
+  Bit64u ips_count = bx_pc_system.time_ticks() - ticks_count;
+  if (ips_count) {
+    bx_gui->show_ips((Bit32u) ips_count);
+    ticks_count = bx_pc_system.time_ticks();
+    counts++;
+    if (bx_dbg.print_timestamps) {
+      printf("IPS: %u\taverage = %u\t\t(%us)\n",
+         (unsigned) ips_count, (unsigned) (ticks_count/counts), (unsigned) counts);
+      fflush(stdout);
+    }
+  }
+  return;
+}
+#endif
 
 void CDECL bx_signal_handler(int signum)
 {
@@ -1430,26 +1460,13 @@ void CDECL bx_signal_handler(int signum)
 #endif
 
 #if BX_SHOW_IPS
-  static Bit64u ticks_count = 0;
-  static Bit64u counts = 0;
-
-  if (signum == SIGALRM)
-  {
-    // amount of system ticks passed from last time the handler was called
-    Bit64u ips_count = bx_pc_system.time_ticks() - ticks_count;
-    if (ips_count) {
-      bx_gui->show_ips((Bit32u) ips_count);
-      ticks_count = bx_pc_system.time_ticks();
-      counts++;
-      if (bx_dbg.print_timestamps) {
-        printf("IPS: %u\taverage = %u\t\t(%us)\n",
-           (unsigned) ips_count, (unsigned) (ticks_count/counts), (unsigned) counts);
-        fflush(stdout);
-      }
-    }
+  if (signum == SIGALRM) {
+    bx_show_ips_handler();
 #if !defined(WIN32)
-    signal(SIGALRM, bx_signal_handler);
-    alarm(1);
+    if (!SIM->is_wx_selected()) {
+      signal(SIGALRM, bx_signal_handler);
+      alarm(1);
+    }
 #endif
     return;
   }

@@ -161,6 +161,7 @@ bx_hard_drive_c::~bx_hard_drive_c()
       SIM->get_param_bool("status", base)->set_handler(NULL);
     }
   }
+  SIM->get_bochs_root()->remove("hard_drive");
   BX_DEBUG(("Exit"));
 }
 
@@ -590,6 +591,9 @@ void bx_hard_drive_c::register_state(void)
       if (BX_DRIVE_IS_PRESENT(i, j)) {
         sprintf(dname, "drive%d", j);
         drive = new bx_list_c(chan, dname);
+        if (channels[i].drives[j].hdimage != NULL) {
+          channels[i].drives[j].hdimage->register_state(drive);
+        }
         new bx_shadow_data_c(drive, "buffer", BX_CONTROLLER(i, j).buffer, MAX_MULTIPLE_SECTORS * 512);
         status = new bx_list_c(drive, "status");
         new bx_shadow_bool_c(status, "busy", &BX_CONTROLLER(i, j).status.busy);

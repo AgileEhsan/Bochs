@@ -2,25 +2,31 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2010/2011  The Bochs Project
-//
-//  This library is free software; you can redistribute it and/or
-//  modify it under the terms of the GNU Lesser General Public
-//  License as published by the Free Software Foundation; either
-//  version 2.1 of the License, or (at your option) any later version.
-//
-//  This library is distributed in the hope that it will be useful,
-//  but WITHOUT ANY WARRANTY; without even the implied warranty of
-//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-//  Lesser General Public License for more details.
-//
-//  You should have received a copy of the GNU Lesser General Public
-//  License along with this library; if not, write to the Free Software
-//  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
-/////////////////////////////////////////////////////////////////////////
-
 // Virtual VFAT image support (shadows a local directory)
-// ported from the Qemu block driver (written by Johannes E. Schindelin)
+// ported from QEMU block driver with some additions (see below)
+//
+// Copyright (c) 2004,2005  Johannes E. Schindelin
+// Copyright (C) 2010-2012  The Bochs Project
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+//
+/////////////////////////////////////////////////////////////////////////
 
 // ADDITIONS:
 // - win32 specific directory functions (required for MSVC)
@@ -561,6 +567,7 @@ direntry_t* vvfat_image_t::create_short_and_long_name(
   int i, j, long_index = directory.next;
   direntry_t* entry = NULL;
   direntry_t* entry_long = NULL;
+  char tempfn[BX_PATHNAME_LEN];
 
   if (is_dot) {
     entry = (direntry_t*)array_get_next(&directory);
@@ -571,8 +578,16 @@ direntry_t* vvfat_image_t::create_short_and_long_name(
 
   entry_long = create_long_filename(filename);
 
-  i = strlen(filename);
-  for (j = i - 1; j>0  && filename[j]!='.';j--);
+  // short name should not contain spaces
+  j = 0;
+  for (i = 0; i < (int)strlen(filename); i++) {
+    if (filename[i] != ' ')
+      tempfn[j++] = filename[i];
+  }
+  tempfn[j] = 0;
+
+  i = strlen(tempfn);
+  for (j = i - 1; j > 0  && tempfn[j] != '.'; j--);
   if (j > 0)
     i = (j > 8 ? 8 : j);
   else if (i > 8)
@@ -580,16 +595,16 @@ direntry_t* vvfat_image_t::create_short_and_long_name(
 
   entry = (direntry_t*)array_get_next(&directory);
   memset(entry->name, 0x20, 11);
-  memcpy(entry->name, filename, i);
+  memcpy(entry->name, tempfn, i);
 
   if (j > 0)
-    for (i = 0; i < 3 && filename[j+1+i]; i++)
-      entry->extension[i] = filename[j+1+i];
+    for (i = 0; i < 3 && tempfn[j+1+i]; i++)
+      entry->extension[i] = tempfn[j+1+i];
 
   // upcase & remove unwanted characters
   for (i=10;i>=0;i--) {
     if (i==10 || i==7) for (;i>0 && entry->name[i]==' ';i--);
-    if (entry->name[i]<=' ' || entry->name[i]>0x7f
+    if ((entry->name[i]<' ') || (entry->name[i]>0x7f)
       || strchr(".*?<>|\":/\\[];,+='",entry->name[i]))
       entry->name[i]='_';
     else if (entry->name[i]>='a' && entry->name[i]<='z')

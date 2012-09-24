@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2005-2011  The Bochs Project
+//  Copyright (C) 2005-2012  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -125,6 +125,7 @@
 
 int bx_read_image(int fd, Bit64s offset, void *buf, int count);
 int bx_write_image(int fd, Bit64s offset, void *buf, int count);
+bx_bool hdimage_backup_file(int fd, const char *backup_fname);
 
 class device_image_t
 {
@@ -153,6 +154,11 @@ class device_image_t
 
       // Get image capabilities
       virtual Bit32u get_capabilities();
+
+      // Save/restore support
+      virtual void register_state(bx_list_c *parent);
+      virtual bx_bool save_state(const char *backup_fname) {return 0;}
+      virtual void restore_state(const char *backup_fname) {}
 
       unsigned cylinders;
       unsigned heads;
@@ -188,8 +194,13 @@ class default_image_t : public device_image_t
       // Get modification time in FAT format
       Bit32u get_timestamp();
 
+      // Save/restore support
+      bx_bool save_state(const char *backup_fname);
+      void restore_state(const char *backup_fname);
+
   private:
       int fd;
+      const char *imgpath;
 #ifndef WIN32
       time_t mtime;
 #else
@@ -221,6 +232,9 @@ class concat_image_t : public device_image_t
       // Write count bytes from buf. Return the number of bytes
       // written (count).
       ssize_t write(const void* buf, size_t count);
+
+      // Save/restore support
+      bx_bool save_state(const char *backup_fname);
 
   private:
 #define BX_CONCAT_MAX_IMAGES 8
@@ -273,6 +287,10 @@ class sparse_image_t : public device_image_t
     // Write count bytes from buf. Return the number of bytes
     // written (count).
     ssize_t write(const void* buf, size_t count);
+
+    // Save/restore support
+    bx_bool save_state(const char *backup_fname);
+    void restore_state(const char *backup_fname);
 
   private:
     int fd;
@@ -367,6 +385,8 @@ class redolog_t
       ssize_t read(void* buf, size_t count);
       ssize_t write(const void* buf, size_t count);
 
+      bx_bool save_state(const char *backup_fname);
+
   private:
       void             print_header();
       int              fd;
@@ -410,8 +430,13 @@ class growing_image_t : public device_image_t
       // written (count).
       ssize_t write(const void* buf, size_t count);
 
+      // Save/restore support
+      bx_bool save_state(const char *backup_fname);
+      void restore_state(const char *backup_fname);
+
   private:
       redolog_t *redolog;
+      const char *imgpath;
 };
 
 // UNDOABLE MODE
@@ -439,6 +464,10 @@ class undoable_image_t : public device_image_t
       // Write count bytes from buf. Return the number of bytes
       // written (count).
       ssize_t write(const void* buf, size_t count);
+
+      // Save/restore support
+      bx_bool save_state(const char *backup_fname);
+      void restore_state(const char *backup_fname);
 
   private:
       redolog_t       *redolog;       // Redolog instance
@@ -472,6 +501,10 @@ class volatile_image_t : public device_image_t
       // Write count bytes from buf. Return the number of bytes
       // written (count).
       ssize_t write(const void* buf, size_t count);
+
+      // Save/restore support
+      bx_bool save_state(const char *backup_fname);
+      void restore_state(const char *backup_fname);
 
   private:
       redolog_t       *redolog;       // Redolog instance

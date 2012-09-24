@@ -34,7 +34,7 @@ typedef void BX_INSF_TYPE;
   if (BX_SMP_PROCESSORS == 1) {                                               \
     Bit32u delta = BX_CPU_THIS_PTR icount - BX_CPU_THIS_PTR icount_last_sync; \
     if (delta >= allowed_delta) {                                             \
-      BX_CPU_THIS_PTR icount_last_sync = BX_CPU_THIS_PTR icount;              \
+      BX_CPU_THIS_PTR sync_icount();                                          \
       BX_TICKN(delta);                                                        \
     }                                                                         \
   }                                                                           \
@@ -49,11 +49,17 @@ typedef void BX_INSF_TYPE;
 #define BX_EXECUTE_INSTRUCTION(i) {                    \
   BX_INSTR_BEFORE_EXECUTION(BX_CPU_ID, (i));           \
   RIP += (i)->ilen();                                  \
-  return BX_CPU_CALL_METHOD(i->execute, (i));          \
+  return BX_CPU_CALL_METHOD(i->execute1, (i));         \
 }
 
 #define BX_NEXT_TRACE(i) {                             \
   BX_COMMIT_INSTRUCTION(i);                            \
+  return;                                              \
+}
+
+#define BX_LINK_TRACE(i) {                             \
+  BX_COMMIT_INSTRUCTION(i);                            \
+  linkTrace(i);                                        \
   return;                                              \
 }
 
@@ -68,6 +74,7 @@ typedef void BX_INSF_TYPE;
 
 #define BX_NEXT_TRACE(i) { return; }
 #define BX_NEXT_INSTR(i) { return; }
+#define BX_LINK_TRACE(i) { return; }
 
 #define BX_SYNC_TIME_IF_SINGLE_PROCESSOR(allowed_delta) \
   if (BX_SMP_PROCESSORS == 1) BX_TICK1()
@@ -97,8 +104,13 @@ public:
   // given the current state of the CPU and the instruction data,
   // and a function to execute the instruction after resolving
   // the memory address (if any).
-  BxExecutePtr_tR execute;
-  BxExecutePtr_tR execute2;
+  BxExecutePtr_tR execute1;
+
+  union {
+    BxExecutePtr_tR execute2;
+    bxInstruction_c *next;
+  } handlers;
+
   BxResolvePtr_tR ResolveModrm;
 
   struct {
@@ -144,6 +156,7 @@ public:
         Bit16u displ16u; // for 16-bit modrm forms
         Bit32u displ32u; // for 32-bit modrm forms
 
+        Bit32u Id2;
         Bit16u Iw2;
         Bit8u  Ib2;
       };
@@ -167,6 +180,10 @@ public:
     memcpy(opcode_bytes, opcode, ilen());
   }
 #endif
+
+  BX_CPP_INLINE BxExecutePtr_tR execute2(void) const {
+    return handlers.execute2;
+  }
 
   BX_CPP_INLINE unsigned seg(void) const {
     return metaData[BX_INSTR_METADATA_SEG];
@@ -209,6 +226,7 @@ public:
   BX_CPP_INLINE Bit32u Id() const  { return modRMForm.Id; }
   BX_CPP_INLINE Bit16u Iw() const  { return modRMForm.Iw; }
   BX_CPP_INLINE Bit8u  Ib() const  { return modRMForm.Ib; }
+  BX_CPP_INLINE Bit16u Id2() const { return modRMForm.Id2; }
   BX_CPP_INLINE Bit16u Iw2() const { return modRMForm.Iw2; }
   BX_CPP_INLINE Bit8u  Ib2() const { return modRMForm.Ib2; }
 #if BX_SUPPORT_X86_64
@@ -349,7 +367,18 @@ public:
   BX_CPP_INLINE void assertModC0()
   {
     metaInfo.metaInfo1 |= (1<<4);
-  }};
+  }
+
+#if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
+  BX_CPP_INLINE bxInstruction_c* getNextTrace() const {
+    return handlers.next;
+  }
+  BX_CPP_INLINE void setNextTrace(bxInstruction_c* iptr) {
+    handlers.next = iptr;
+  }
+#endif
+
+};
 // <TAG-CLASS-INSTRUCTION-END>
 
 enum {

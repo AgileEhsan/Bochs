@@ -1,5 +1,5 @@
 .\"Document Author:  Timothy R. Butler   -   tbutler@uninetsolutions.com"
-.TH bochsrc 5 "16 Aug 2012" "bochsrc" "The Bochs Project"
+.TH bochsrc 5 "28 Aug 2012" "bochsrc" "The Bochs Project"
 .\"SKIP_SECTION"
 .SH NAME
 bochsrc \- Configuration file for Bochs.
@@ -108,7 +108,7 @@ Some display libraries now support specific options to control their
 behaviour. These options are supported by more than one display library:
 
   "gui_debug"   - use GTK debugger gui (sdl, x)
-  "hideIPS"     - disable IPS output in status bar (sdl, wx, x)
+  "hideIPS"     - disable IPS output in status bar (rfb, sdl, wx, x)
   "nokeyrepeat" - turn off host keyboard repeat (sdl, x)
 
 See the examples below for other currently supported options.
@@ -323,6 +323,11 @@ This option exists only if Bochs compiled with x86-64 support.
 smep:
 
 Enable Supervisor Mode Execution Protection (SMEP) support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+
+smap:
+
+Enable Supervisor Mode Access Protection (SMAP) support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 
 mwait:
@@ -1123,8 +1128,8 @@ Example:
 .SH LICENSE
 This program  is distributed  under the terms of the  GNU
 Lesser General Public License as published  by  the  Free
-Software  Foundation.  See  the  COPYING file located  in
-/usr/share/doc/bochs/ for details on the license and
+Software  Foundation.  See  the LICENSE and COPYING files located
+in /usr/share/doc/bochs/ for details on the license and
 the lack of warranty.
 .\"SKIP_SECTION"
 .SH AVAILABILITY

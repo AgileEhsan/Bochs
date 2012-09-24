@@ -7,6 +7,8 @@
 //    Donald Becker
 //    http://www.psyon.org
 //
+//  Copyright (C) 2001-2012  The Bochs Project
+//
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
 //  License as published by the Free Software Foundation; either
@@ -96,10 +98,14 @@ typedef int SOCKET;
 
 #endif
 
-static bool keep_alive;
-static bool client_connected;
-static bool desktop_resizable;
-
+static bx_bool keep_alive;
+static bx_bool client_connected;
+static bx_bool desktop_resizable;
+#if BX_SHOW_IPS
+static bx_bool rfbHideIPS = 0;
+static bx_bool rfbIPSupdate = 0;
+static char rfbIPStext[40];
+#endif
 static unsigned short rfbPort;
 
 // Headerbar stuff
@@ -190,6 +196,10 @@ void rfbKeyPressed(Bit32u key, int press_release);
 void rfbMouseMove(int x, int y, int bmask);
 void DrawColorPalette();
 
+#if BX_SHOW_IPS && defined(WIN32)
+DWORD WINAPI ShowIPSthread(LPVOID);
+#endif
+
 static const rfbPixelFormat BGR233Format = {
     8, 8, 1, 1, 7, 7, 3, 0, 3, 6
 };
@@ -203,8 +213,8 @@ static const rfbPixelFormat BGR233Format = {
 // Called from gui.cc, once upon program startup, to allow for the
 // specific GUI code (X11, Win32, ...) to be initialized.
 //
-// argc, argv: not used right now, but the intention is to pass native GUI
-//     specific options from the command line.  (X11 options, Win32 options,...)
+// argc, argv: used to pass display library specific options to the init code
+//     (X11 options, Win32 options,...)
 //
 // headerbar_y:  A headerbar (toolbar) is display on the top of the
 //     VGA window, showing floppy status, and other information.  It
@@ -253,9 +263,9 @@ void bx_rfb_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   clientEncodingsCount=0;
   clientEncodings=NULL;
 
-  keep_alive = true;
-  client_connected = false;
-  desktop_resizable = false;
+  keep_alive = 1;
+  client_connected = 0;
+  desktop_resizable = 0;
   StartThread();
 
 #ifdef WIN32
@@ -266,7 +276,7 @@ void bx_rfb_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
     BX_ERROR(("private_colormap option ignored."));
   }
 
-  // load keymap for sdl
+  // load keymap for rfb
   if (SIM->get_param_bool(BXPN_KBD_USEMAPPING)->get()) {
     bx_keymap.loadKeymap(convertStringToRfbKey);
   }
@@ -276,6 +286,11 @@ void bx_rfb_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
     for (i = 1; i < argc; i++) {
       if (!strncmp(argv[i], "timeout=", 8)) {
         timeout = atoi(&argv[i][8]);
+#if BX_SHOW_IPS
+      } else if (!strcmp(argv[i], "hideIPS")) {
+        BX_INFO(("hide IPS display in status bar"));
+        rfbHideIPS = 1;
+#endif
       } else {
         BX_PANIC(("Unknown rfb option '%s'", argv[i]));
       }
@@ -286,13 +301,25 @@ void bx_rfb_gui_c::specific_init(int argc, char **argv, unsigned headerbar_y)
   io->set_log_action(LOGLEV_PANIC, ACT_FATAL);
 
   while ((!client_connected) && (timeout--)) {
+    fprintf(stderr, "Waiting for RFB client: %2d\r", timeout+1);
 #ifdef WIN32
     Sleep(1000);
 #else
     sleep(1);
 #endif
   }
-  if (timeout < 0) BX_PANIC(("timeout! no client present"));
+  if ((timeout < 0) && (!client_connected)) {
+    BX_PANIC(("timeout! no client present"));
+  } else {
+    fprintf(stderr, "RFB client connected      \r");
+  }
+
+#if BX_SHOW_IPS && defined(WIN32)
+  if (!rfbHideIPS) {
+    DWORD threadID;
+    CreateThread(NULL, 0, ShowIPSthread, NULL, 0, &threadID);
+  }
+#endif
 
   new_gfx_api = 1;
   dialog_caps = 0;
@@ -370,7 +397,7 @@ void CDECL ServerThreadInit(void *indata)
 #endif
 
     sServer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(sServer == -1) {
+    if(sServer == (SOCKET) -1) {
         BX_PANIC(("could not create socket."));
         goto end_of_thread;
     }
@@ -404,7 +431,7 @@ void CDECL ServerThreadInit(void *indata)
     }
     BX_INFO (("listening for connections on port %i", rfbPort));
     sai_size = sizeof(sai);
-    while(keep_alive) {
+    while (keep_alive) {
         sClient = accept(sServer, (struct sockaddr *)&sai, (socklen_t*)&sai_size);
         if(sClient != INVALID_SOCKET) {
             HandleRfbClient(sClient);
@@ -432,10 +459,9 @@ void HandleRfbClient(SOCKET sClient)
   rfbServerInitMessage sim;
   bx_bool mouse_toggle = 0;
 
-  client_connected = true;
   setsockopt(sClient, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
   BX_INFO(("accepted client connection."));
-  snprintf(pv, rfbProtocolVersionMessageSize,
+  snprintf(pv, rfbProtocolVersionMessageSize + 1,
            rfbProtocolVersionFormat,
            rfbServerProtocolMajorVersion,
            rfbServerProtocolMinorVersion);
@@ -481,8 +507,9 @@ void HandleRfbClient(SOCKET sClient)
     return;
   }
 
+  client_connected = 1;
   sGlobal = sClient;
-  while(keep_alive) {
+  while (keep_alive) {
     U8 msgType;
     int n;
 
@@ -569,7 +596,7 @@ void HandleRfbClient(SOCKET sClient)
                 BX_INFO(("%08x %s", rfbEncodings[j].id, rfbEncodings[j].name));
                 found=1;
                 if (clientEncodings[i] == rfbEncodingDesktopSize) {
-                  desktop_resizable = true;
+                  desktop_resizable = 1;
                 }
                 break;
               }
@@ -689,6 +716,12 @@ void bx_rfb_gui_c::handle_events(void)
         rfbUpdateRegion.height = 0;
     }
     rfbUpdateRegion.updated = false;
+#if BX_SHOW_IPS
+  if (rfbIPSupdate) {
+    rfbIPSupdate = 0;
+    rfbSetStatusText(0, rfbIPStext, 1);
+  }
+#endif
 }
 
 // ::FLUSH()
@@ -1105,7 +1138,7 @@ void bx_rfb_gui_c::replace_bitmap(unsigned hbar_id, unsigned bmap_id)
 void bx_rfb_gui_c::exit(void)
 {
     unsigned int i;
-    keep_alive = false;
+    keep_alive = 0;
 #ifdef WIN32
     StopWinsock();
 #endif
@@ -1649,7 +1682,7 @@ void rfbMouseMove(int x, int y, int bmask)
   }
   if(y > rfbHeaderbarY) {
     if (rfbMouseModeAbsXY) {
-      if ((y >= rfbHeaderbarY) && (y < (rfbDimensionY + rfbHeaderbarY))) {
+      if ((y >= rfbHeaderbarY) && (y < (int)(rfbDimensionY + rfbHeaderbarY))) {
         dx = x * 0x7fff / rfbDimensionX;
         dy = (y - rfbHeaderbarY) * 0x7fff / rfbDimensionY;
         DEV_mouse_motion(dx, dy, 0, bmask, 1);
@@ -1697,11 +1730,32 @@ void bx_rfb_gui_c::set_mouse_mode_absxy(bx_bool mode)
 }
 
 #if BX_SHOW_IPS
+#ifdef WIN32
+VOID CALLBACK IPSTimerProc(HWND hWnd, UINT nMsg, UINT_PTR nIDEvent, DWORD dwTime)
+{
+  bx_show_ips_handler();
+}
+
+DWORD WINAPI ShowIPSthread(LPVOID)
+{
+  MSG msg;
+
+  UINT TimerId = SetTimer(NULL, 0, 1000, &IPSTimerProc);
+  while (keep_alive && GetMessage(&msg, NULL, 0, 0)) {
+    DispatchMessage(&msg);
+  }
+  KillTimer(NULL, TimerId);
+  return 0;
+}
+#endif
+
 void bx_rfb_gui_c::show_ips(Bit32u ips_count)
 {
-  char ips_text[40];
-  sprintf(ips_text, "IPS: %3.3fM", ips_count / 1000000.0);
-  rfbSetStatusText(0, ips_text, 1);
+  if (!rfbIPSupdate && !rfbHideIPS) {
+    ips_count /= 1000;
+    sprintf(rfbIPStext, "IPS: %u.%3.3uM", ips_count / 1000, ips_count % 1000);
+    rfbIPSupdate = 1;
+  }
 }
 #endif
 

@@ -36,7 +36,7 @@
 #endif
 
 
-int bochsrc_include_count = 0;
+int bochsrc_include_level = 0;
 #if BX_PLUGINS
 Bit8u bx_user_plugin_count = 0;
 #endif
@@ -242,6 +242,33 @@ void bx_init_usb_options(const char *usb_name, const char *pname, int maxports)
   enabled->set_dependent_list(deplist);
 }
 
+void bx_plugin_ctrl_reset(bx_bool init_done)
+{
+  bx_list_c *base = (bx_list_c*) SIM->get_param(BXPN_PLUGIN_CTRL);
+  if (init_done) {
+    for (int i = 0; i < base->get_size(); i++) {
+      ((bx_param_bool_c*)base->get(i))->set(0);
+    }
+    SIM->opt_plugin_ctrl("*", 0);
+  }
+  // add the default set of plugins to the list
+  new bx_param_bool_c(base, "unmapped", "", "", 1);
+  new bx_param_bool_c(base, "biosdev", "", "", 1);
+  new bx_param_bool_c(base, "speaker", "", "", 1);
+  new bx_param_bool_c(base, "extfpuirq", "", "", 1);
+  new bx_param_bool_c(base, "parallel", "", "", 1);
+  new bx_param_bool_c(base, "serial", "", "", 1);
+#if BX_SUPPORT_GAMEPORT
+  new bx_param_bool_c(base, "gameport", "", "", 1);
+#endif
+#if BX_SUPPORT_IODEBUG && BX_DEBUGGER
+  new bx_param_bool_c(base, "iodebug", "", "", 1);
+#endif
+  if (init_done) {
+    SIM->opt_plugin_ctrl("*", 1);
+  }
+}
+
 void bx_init_options()
 {
   int i;
@@ -317,20 +344,8 @@ void bx_init_options()
   new bx_list_c(logfn, "panic", "");
 
   // optional plugin control
-  menu = new bx_list_c(menu, "plugin_ctrl", "Optional Plugin Control");
-  // add the default set of plugins to the list
-  new bx_param_bool_c(menu, "unmapped", "", "", 1);
-  new bx_param_bool_c(menu, "biosdev", "", "", 1);
-  new bx_param_bool_c(menu, "speaker", "", "", 1);
-  new bx_param_bool_c(menu, "extfpuirq", "", "", 1);
-  new bx_param_bool_c(menu, "parallel", "", "", 1);
-  new bx_param_bool_c(menu, "serial", "", "", 1);
-#if BX_SUPPORT_GAMEPORT
-  new bx_param_bool_c(menu, "gameport", "", "", 1);
-#endif
-#if BX_SUPPORT_IODEBUG && BX_DEBUGGER
-  new bx_param_bool_c(menu, "iodebug", "", "", 1);
-#endif
+  new bx_list_c(menu, "plugin_ctrl", "Optional Plugin Control");
+  bx_plugin_ctrl_reset(0);
 
   // subtree for special menus
   bx_list_c *special_menus = new bx_list_c(root_param, "menu", "");
@@ -581,6 +596,10 @@ void bx_init_options()
   new bx_param_bool_c(cpuid_param,
       "smep", "Supervisor Mode Execution Protection support",
       "Supervisor Mode Execution Protection support",
+      0);
+  new bx_param_bool_c(cpuid_param,
+      "smap", "Supervisor Mode Access Protection support",
+      "Supervisor Mode Access Protection support",
       0);
 #if BX_SUPPORT_MONITOR_MWAIT
   new bx_param_bool_c(cpuid_param,
@@ -1555,6 +1574,9 @@ void bx_init_options()
 
 void bx_reset_options()
 {
+  // optional plugin control
+  bx_plugin_ctrl_reset(1);
+
   // cpu
   SIM->get_param("cpu")->reset();
 
@@ -1690,7 +1712,7 @@ static int parse_bochsrc(const char *rcfile)
 
   // try several possibilities for the bochsrc before giving up
 
-  bochsrc_include_count++;
+  bochsrc_include_level++;
 
   fd = fopen (rcfile, "r");
   if (fd == NULL) return -1;
@@ -1712,7 +1734,7 @@ static int parse_bochsrc(const char *rcfile)
     linenum++;
   } while (!feof(fd));
   fclose(fd);
-  bochsrc_include_count--;
+  bochsrc_include_level--;
   return retval;
 }
 
@@ -2098,8 +2120,8 @@ static int parse_line_formatted(const char *context, int num_params, char *param
     if (!strcmp(params[1], context)) {
       PARSE_ERR(("%s: cannot include this file again.", context));
     }
-    if (bochsrc_include_count == 2) {
-      PARSE_ERR(("%s: include directive in an included file not supported yet.", context));
+    if (bochsrc_include_level > 2) {
+      PARSE_ERR(("%s: maximum include level exceeded (limit = 2).", context));
     }
     bx_read_configuration(params[1]);
   }
@@ -2514,8 +2536,6 @@ static int parse_line_formatted(const char *context, int num_params, char *param
       } else if (!strncmp(params[i], "apic=", 5)) {
         if (! SIM->get_param_enum(BXPN_CPUID_APIC)->set_by_name(&params[i][5]))
           PARSE_ERR(("%s: unsupported apic option.", context));
-      } else if (!strncmp(params[i], "xapic=", 6)) {
-        PARSE_ERR(("%s: unsupported xapic option (deprecated).", context));
 #endif
 #if BX_CPU_LEVEL >= 6
       } else if (!strncmp(params[i], "sse=", 4)) {
@@ -2605,6 +2625,10 @@ static int parse_line_formatted(const char *context, int num_params, char *param
 #endif
       } else if (!strncmp(params[i], "smep=", 5)) {
         if (parse_param_bool(params[i], 5, BXPN_CPUID_SMEP) < 0) {
+          PARSE_ERR(("%s: cpuid directive malformed.", context));
+        }
+      } else if (!strncmp(params[i], "smap=", 5)) {
+        if (parse_param_bool(params[i], 5, BXPN_CPUID_SMAP) < 0) {
           PARSE_ERR(("%s: cpuid directive malformed.", context));
         }
 #if BX_SUPPORT_MONITOR_MWAIT
@@ -3554,7 +3578,7 @@ int bx_write_configuration(const char *rc, int overwrite)
       SIM->get_param_enum(BXPN_CPUID_APIC)->get_selected());
 #endif
 #if BX_CPU_LEVEL >= 6
-    fprintf(fp, ", sse=%s, sse4a=%d, sep=%d, aes=%d, xsave=%d, xsaveopt=%d, movbe=%d, adx=%d, smep=%d",
+    fprintf(fp, ", sse=%s, sse4a=%d, sep=%d, aes=%d, xsave=%d, xsaveopt=%d, movbe=%d, adx=%d, smep=%d, smap=%d",
       SIM->get_param_enum(BXPN_CPUID_SSE)->get_selected(),
       SIM->get_param_bool(BXPN_CPUID_SSE4A)->get(),
       SIM->get_param_bool(BXPN_CPUID_SEP)->get(),
@@ -3563,7 +3587,8 @@ int bx_write_configuration(const char *rc, int overwrite)
       SIM->get_param_bool(BXPN_CPUID_XSAVEOPT)->get(),
       SIM->get_param_bool(BXPN_CPUID_MOVBE)->get(),
       SIM->get_param_bool(BXPN_CPUID_ADX)->get(),
-      SIM->get_param_bool(BXPN_CPUID_SMEP)->get());
+      SIM->get_param_bool(BXPN_CPUID_SMEP)->get(),
+      SIM->get_param_bool(BXPN_CPUID_SMAP)->get());
 #if BX_SUPPORT_AVX
     fprintf(fp, ", avx=%d, avx_f16c=%d, avx_fma=%d, bmi=%d, xop=%d, tbm=%d, fma4=%d", 
       SIM->get_param_num(BXPN_CPUID_AVX)->get(),

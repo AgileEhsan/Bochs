@@ -22,7 +22,7 @@
 
 // Experimental USB OHCI adapter
 
-// Notes: See usb_common.cc
+// Notes: See usb_uhci.cc
 
 // Define BX_PLUGGABLE in files that can be compiled into plugins.  For
 // platforms that require a special tag on exported symbols, BX_PLUGGABLE
@@ -149,6 +149,7 @@ bx_usb_ohci_c::~bx_usb_ohci_c()
     remove_device(i);
   }
 
+  SIM->get_bochs_root()->remove("usb_ohci");
   BX_DEBUG(("Exit"));
 }
 

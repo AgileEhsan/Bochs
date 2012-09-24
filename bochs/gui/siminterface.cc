@@ -74,6 +74,7 @@ class bx_real_sim_c : public bx_simulator_interface_c {
   int exit_code;
   unsigned param_id;
   bx_bool bx_debug_gui;
+  bx_bool wxsel;
 public:
   bx_real_sim_c();
   virtual ~bx_real_sim_c() {}
@@ -167,6 +168,7 @@ public:
   virtual bx_bool is_sim_thread();
   virtual void set_debug_gui(bx_bool val) { bx_debug_gui = val; }
   virtual bx_bool has_debug_gui() const { return bx_debug_gui; }
+  virtual bx_bool is_wx_selected() const { return wxsel; }
   // provide interface to bx_gui->set_display_mode() method for config
   // interfaces to use.
   virtual void set_display_mode(disp_mode_t newmode) {
@@ -336,6 +338,7 @@ bx_real_sim_c::bx_real_sim_c()
   ci_callback_data = NULL;
   is_sim_thread_func = NULL;
   bx_debug_gui = 0;
+  wxsel = 0;
 
   enabled = 1;
   init_done = 0;
@@ -817,9 +820,10 @@ int bx_real_sim_c::configuration_interface(const char *ignore, ci_command_t comm
     return -1;
   }
   if (!strcmp(name, "wx"))
-    bx_debug_gui = 1;
+    wxsel = 1;
   else
-    bx_debug_gui = 0;
+    wxsel = 0;
+  bx_debug_gui = wxsel;
   // enter configuration mode, just while running the configuration interface
   set_display_mode(DISP_MODE_CONFIG);
   int retval = (*ci_callback)(ci_callback_data, command);
@@ -1004,6 +1008,7 @@ bx_bool bx_real_sim_c::save_state(const char *checkpoint_path)
   int i, dev, ndev = SIM->get_n_log_modules();
   int type, ntype = SIM->get_max_log_level();
 
+  get_param_string(BXPN_RESTORE_PATH)->set(checkpoint_path);
   sprintf(sr_file, "%s/config", checkpoint_path);
   if (write_rc(sr_file, 1) < 0)
     return 0;
@@ -1267,7 +1272,7 @@ bx_bool bx_real_sim_c::save_sr_param(FILE *fp, bx_param_c *node, const char *sr_
 {
   int i;
   Bit64s value;
-  char tmpstr[BX_PATHNAME_LEN], tmpbyte[4];
+  char pname[BX_PATHNAME_LEN], tmpstr[BX_PATHNAME_LEN], tmpbyte[4];
   FILE *fp2;
 
   for (i=0; i<level; i++)
@@ -1327,11 +1332,15 @@ bx_bool bx_real_sim_c::save_sr_param(FILE *fp, bx_param_c *node, const char *sr_
       }
       break;
     case BXT_PARAM_DATA:
-      fprintf(fp, "%s.%s\n", node->get_parent()->get_name(), node->get_name());
+      node->get_param_path(pname, BX_PATHNAME_LEN);
+      if (!strncmp(pname, "bochs.", 6)) {
+        strcpy(pname, pname+6);
+      }
+      fprintf(fp, "%s\n", pname);
       if (sr_path)
-        sprintf(tmpstr, "%s/%s.%s", sr_path, node->get_parent()->get_name(), node->get_name());
+        sprintf(tmpstr, "%s/%s", sr_path, pname);
       else
-        sprintf(tmpstr, "%s.%s", node->get_parent()->get_name(), node->get_name());
+        strcpy(tmpstr, pname);
       fp2 = fopen(tmpstr, "wb");
       if (fp2 != NULL) {
         fwrite(((bx_shadow_data_c*)node)->getptr(), 1, ((bx_shadow_data_c*)node)->get_size(), fp2);

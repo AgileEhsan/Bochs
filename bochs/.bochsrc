@@ -69,7 +69,7 @@
 # behaviour. These options are supported by more than one display library:
 #
 # "gui_debug"   - use GTK debugger gui (sdl, x) / Win32 debugger gui (sdl, win32)
-# "hideIPS"     - disable IPS output in status bar (sdl, wx, x)
+# "hideIPS"     - disable IPS output in status bar (rfb, sdl, win32, wx, x)
 # "nokeyrepeat" - turn off host keyboard repeat (sdl, win32, x)
 #
 # See the examples below for other currently supported options.
@@ -283,6 +283,10 @@ cpu: cpuid_limit_winnt=0
 #
 #  SMEP:
 #    Enable Supervisor Mode Execution Protection (SMEP) support.
+#    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+#
+#  SMAP:
+#    Enable Supervisor Mode Access Protection (SMAP) support.
 #    This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 #
 #  MWAIT:

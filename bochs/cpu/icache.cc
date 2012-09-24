@@ -55,21 +55,18 @@ BX_INSF_TYPE BX_CPU_C::BxEndTrace(bxInstruction_c *i)
   // do nothing, return to main cpu_loop
 }
 
-void genDummyICacheEntry(bxInstruction_c *i, BxExecutePtr_tR execute)
+void genDummyICacheEntry(bxInstruction_c *i)
 {
   i->setILen(0);
   i->setIaOpcode(BX_INSERTED_OPCODE);
-  i->execute = execute;
+  i->execute1 = &BX_CPU_C::BxEndTrace;
 }
 
 #endif
 
 bxICacheEntry_c* BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBiased, bx_phy_address pAddr)
 {
-  bxICacheEntry_c *vc_hit = BX_CPU_THIS_PTR iCache.lookup_victim_cache(pAddr, BX_CPU_THIS_PTR fetchModeMask);
-  if (vc_hit) {
-    return vc_hit;
-  }
+  entry = BX_CPU_THIS_PTR iCache.get_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
 
   BX_CPU_THIS_PTR iCache.victim_entry(entry, BX_CPU_THIS_PTR fetchModeMask);
 
@@ -127,7 +124,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBia
 
 #if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
       entry->tlen++; /* Add the inserted end of trace opcode */
-      genDummyICacheEntry(++i, &BX_CPU_C::BxEndTrace);
+      genDummyICacheEntry(++i);
 #endif
 
       BX_CPU_THIS_PTR iCache.commit_page_split_trace(BX_CPU_THIS_PTR pAddrFetchPage, entry);
@@ -175,7 +172,7 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBia
 
 #if BX_SUPPORT_HANDLERS_CHAINING_SPEEDUPS
   entry->tlen++; /* Add the inserted end of trace opcode */
-  genDummyICacheEntry(i, &BX_CPU_C::BxEndTrace);
+  genDummyICacheEntry(i);
 #endif
 
   BX_CPU_THIS_PTR iCache.commit_trace(entry->tlen);
@@ -185,9 +182,9 @@ bxICacheEntry_c* BX_CPU_C::serveICacheMiss(bxICacheEntry_c *entry, Bit32u eipBia
 
 bx_bool BX_CPU_C::mergeTraces(bxICacheEntry_c *entry, bxInstruction_c *i, bx_phy_address pAddr)
 {
-  bxICacheEntry_c *e = BX_CPU_THIS_PTR iCache.get_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
+  bxICacheEntry_c *e = BX_CPU_THIS_PTR iCache.find_entry(pAddr, BX_CPU_THIS_PTR fetchModeMask);
 
-  if (e->pAddr == pAddr)
+  if (e != NULL)
   {
     // determine max amount of instruction to take from another entry
     unsigned max_length = e->tlen;

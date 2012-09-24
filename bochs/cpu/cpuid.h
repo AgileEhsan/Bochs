@@ -117,6 +117,7 @@ typedef bx_cpuid_t* (*bx_create_cpuid_method)(BX_CPU_C *cpu);
 #define BX_ISA_TBM                   (BX_CONST64(1) << 38)  /* TBM instruction (AMD) */
 #define BX_ISA_SVM                   (BX_CONST64(1) << 39)  /* SVM instruction (AMD) */
 #define BX_ISA_ADX                   (BX_CONST64(1) << 40)  /* ADCX/ADOX instruction */
+#define BX_ISA_SMAP                  (BX_CONST64(1) << 41)  /* SMAP support */
 
 // cpuid non-ISA features
 #define BX_CPU_DEBUG_EXTENSIONS      (1 <<  0)              /* Debug Extensions support */
@@ -143,7 +144,7 @@ typedef bx_cpuid_t* (*bx_create_cpuid_method)(BX_CPU_C *cpu);
 // cpuid VMX features
 #define BX_VMX_TPR_SHADOW            (1 <<  0)              /* TPR shadow */
 #define BX_VMX_VIRTUAL_NMI           (1 <<  1)              /* Virtual NMI */
-#define BX_VMX_APIC_VIRTUALIZATION   (1 <<  2)              /* APIC Virtualization */
+#define BX_VMX_APIC_VIRTUALIZATION   (1 <<  2)              /* APIC Access Virtualization */
 #define BX_VMX_WBINVD_VMEXIT         (1 <<  3)              /* WBINVD VMEXIT */
 #define BX_VMX_PERF_GLOBAL_CTRL      (1 <<  4)              /* Save/Restore MSR_PERF_GLOBAL_CTRL */
 #define BX_VMX_MONITOR_TRAP_FLAG     (1 <<  5)              /* Monitor trap Flag (MTF) */
@@ -159,6 +160,8 @@ typedef bx_cpuid_t* (*bx_create_cpuid_method)(BX_CPU_C *cpu);
 #define BX_VMX_PAUSE_LOOP_EXITING    (1 << 15)              /* Pause Loop Exiting */
 #define BX_VMX_EPTP_SWITCHING        (1 << 16)              /* EPTP switching (VM Function 0) */
 #define BX_VMX_EPT_ACCESS_DIRTY      (1 << 17)              /* Extended Page Tables (EPT) A/D Bits */
+#define BX_VMX_VIRTUAL_APIC_REGS     (1 << 18)              /* APIC Registers Virtualization */
+#define BX_VMX_VIRTUAL_INTERRUPTS    (1 << 19)              /* Virtual Interrupt Delivery */
 
 // CPUID defines - STD features CPUID[0x00000001].EDX
 // ----------------------------
@@ -315,7 +318,8 @@ typedef bx_cpuid_t* (*bx_create_cpuid_method)(BX_CPU_C *cpu);
 //   [17:12]  reserved
 //   [18:18]  RDSEED instruction support
 //   [19:19]  ADCX/ADOX instructions support
-//   [31:20]  reserved
+//   [20:20]  SMAP: Supervisor Mode Access Protection
+//   [31:21]  reserved
 
 #define BX_CPUID_EXT3_FSGSBASE               (1 <<  0)
 #define BX_CPUID_EXT3_RESERVED1              (1 <<  1)
@@ -337,6 +341,7 @@ typedef bx_cpuid_t* (*bx_create_cpuid_method)(BX_CPU_C *cpu);
 #define BX_CPUID_EXT3_RESERVED17             (1 << 17)
 #define BX_CPUID_EXT3_RDSEED                 (1 << 18)
 #define BX_CPUID_EXT3_ADX                    (1 << 19)
+#define BX_CPUID_EXT3_SMAP                   (1 << 20)
 // ...
 
 

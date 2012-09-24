@@ -2,7 +2,7 @@
 // $Id$
 /////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2002-2011  The Bochs Project
+//  Copyright (C) 2002-2012  The Bochs Project
 //
 //  This library is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU Lesser General Public
@@ -155,6 +155,125 @@ int bx_write_image(int fd, Bit64s offset, void *buf, int count)
   return write(fd, buf, count);
 }
 
+Bit64s hdimage_save_handler(void *class_ptr, bx_param_c *param)
+{
+  char imgname[BX_PATHNAME_LEN];
+  char path[BX_PATHNAME_LEN];
+
+  param->get_param_path(imgname, BX_PATHNAME_LEN);
+  if (!strncmp(imgname, "bochs.", 6)) {
+    strcpy(imgname, imgname+6);
+  }
+  sprintf(path, "%s/%s", SIM->get_param_string(BXPN_RESTORE_PATH)->getptr(), imgname);
+  return ((device_image_t*)class_ptr)->save_state(path);
+}
+
+void hdimage_restore_handler(void *class_ptr, bx_param_c *param, Bit64s value)
+{
+  char imgname[BX_PATHNAME_LEN];
+  char path[BX_PATHNAME_LEN];
+
+  if (value != 0) {
+    param->get_param_path(imgname, BX_PATHNAME_LEN);
+    if (!strncmp(imgname, "bochs.", 6)) {
+      strcpy(imgname, imgname+6);
+    }
+    sprintf(path, "%s/%s", SIM->get_param_string(BXPN_RESTORE_PATH)->getptr(), imgname);
+    ((device_image_t*)class_ptr)->restore_state(path);
+  }
+}
+
+bx_bool hdimage_backup_file(int fd, const char *backup_fname)
+{
+  char *buf;
+  off_t offset;
+  int nread, size;
+  bx_bool ret = 1;
+
+  int backup_fd = ::open(backup_fname, O_RDWR | O_CREAT | O_TRUNC
+#ifdef O_BINARY
+    | O_BINARY
+#endif
+    , S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP);
+  if (backup_fd >= 0) {
+    offset = 0;
+    size = 0x20000;
+    buf = (char*)malloc(size);
+    if (buf == NULL) {
+      ::close(backup_fd);
+      return 0;
+    }
+    while ((nread = bx_read_image(fd, offset, buf, size)) > 0) {
+      if (bx_write_image(backup_fd, offset, buf, nread) < 0) {
+        ret = 0;
+        break;
+      }
+      if (nread < size) {
+        break;
+      }
+      offset += size;
+    };
+    if (nread < 0) {
+      ret = 0;
+    }
+    free(buf);
+    ::close(backup_fd);
+    return ret;
+  }
+  return 0;
+}
+
+bx_bool hdimage_copy_file(const char *src, const char *dst)
+{
+#ifdef WIN32
+  return (bx_bool)CopyFile(src, dst, FALSE);
+#else
+  int fd1, fd2;
+  char *buf;
+  off_t offset;
+  int nread, size;
+  bx_bool ret = 1;
+
+  fd1 = ::open(src, O_RDONLY
+#ifdef O_BINARY
+    | O_BINARY
+#endif
+    );
+  if (fd1 < 0) return 0;
+  fd2 = ::open(dst, O_RDWR | O_CREAT | O_TRUNC
+#ifdef O_BINARY
+    | O_BINARY
+#endif
+    , S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP);
+  if (fd2 < 0) return 0;
+  offset = 0;
+  size = 0x20000;
+  buf = (char*)malloc(size);
+  if (buf == NULL) {
+    ::close(fd1);
+    ::close(fd2);
+    return 0;
+  }
+  while ((nread = bx_read_image(fd1, offset, buf, size)) > 0) {
+    if (bx_write_image(fd2, offset, buf, nread) < 0) {
+      ret = 0;
+      break;
+    }
+    if (nread < size) {
+      break;
+    }
+    offset += size;
+  };
+  if (nread < 0) {
+    ret = 0;
+  }
+  free(buf);
+  ::close(fd1);
+  ::close(fd2);
+  return ret;
+#endif
+}
+
 /*** base class device_image_t ***/
 
 device_image_t::device_image_t()
@@ -165,6 +284,13 @@ device_image_t::device_image_t()
 Bit32u device_image_t::get_capabilities()
 {
   return (cylinders == 0) ? HDIMAGE_AUTO_GEOMETRY : 0;
+}
+
+void device_image_t::register_state(bx_list_c *parent)
+{
+  bx_param_bool_c *image = new bx_param_bool_c(parent, "image", NULL, NULL, 0);
+  // TODO: restore image
+  image->set_sr_handlers(this, hdimage_save_handler, hdimage_restore_handler);
 }
 
 /*** default_image_t function definitions ***/
@@ -223,6 +349,7 @@ int default_image_t::open(const char* pathname, int flags)
   BX_INFO(("hd_size: "FMT_LL"u", hd_size));
   if (hd_size <= 0) BX_PANIC(("size of disk image not detected / invalid"));
   if ((hd_size % 512) != 0) BX_PANIC(("size of disk image must be multiple of 512 bytes"));
+  imgpath = pathname;
   return fd;
 }
 
@@ -252,6 +379,25 @@ Bit32u default_image_t::get_timestamp()
 {
   return (fat_datetime(mtime, 1) | (fat_datetime(mtime, 0) << 16));
 }
+
+bx_bool default_image_t::save_state(const char *backup_fname)
+{
+  return hdimage_backup_file(fd, backup_fname);
+}
+
+void default_image_t::restore_state(const char *backup_fname)
+{
+  close();
+  if (!hdimage_copy_file(backup_fname, imgpath)) {
+    BX_PANIC(("Failed to restore image '%s'", imgpath));
+    return;
+  }
+  if (open(imgpath) < 0) {
+    BX_PANIC(("Failed to open restored image '%s'", imgpath));
+  }
+}
+
+// helper function for concat and sparse mode images
 
 char increment_string(char *str, int diff)
 {
@@ -285,9 +431,9 @@ int concat_image_t::open(const char* pathname0)
   for (int i=0; i<BX_CONCAT_MAX_IMAGES; i++) {
     fd_table[i] = ::open(pathname, O_RDWR
 #ifdef O_BINARY
-		| O_BINARY
+                  | O_BINARY
 #endif
-	  );
+                  );
     if (fd_table[i] < 0) {
       // open failed.
       // if no FD was opened successfully, return -1 (fail).
@@ -330,8 +476,10 @@ int concat_image_t::open(const char* pathname0)
 void concat_image_t::close()
 {
   BX_DEBUG(("concat_image_t.close"));
-  if (fd > -1) {
-    ::close(fd);
+  for (int index = 0; index < maxfd; index++) {
+    if (fd_table[index] > -1) {
+      ::close(fd_table[index]);
+    }
   }
 }
 
@@ -345,24 +493,24 @@ Bit64s concat_image_t::lseek(Bit64s offset, int whence)
     // no, look at previous images
     for (int i=index-1; i>=0; i--) {
       if (offset >= start_offset_table[i]) {
-	index = i;
-	fd = fd_table[i];
-	thismin = start_offset_table[i];
-	thismax = thismin + length_table[i] - 1;
-	BX_DEBUG(("concat_image_t.lseek to earlier image, index=%d", index));
-	break;
+        index = i;
+        fd = fd_table[i];
+        thismin = start_offset_table[i];
+        thismax = thismin + length_table[i] - 1;
+        BX_DEBUG(("concat_image_t.lseek to earlier image, index=%d", index));
+        break;
       }
     }
   } else if (offset > thismax) {
     // no, look at later images
     for (int i=index+1; i<maxfd; i++) {
       if (offset < start_offset_table[i] + length_table[i]) {
-	index = i;
-	fd = fd_table[i];
-	thismin = start_offset_table[i];
-	thismax = thismin + length_table[i] - 1;
-	BX_DEBUG(("concat_image_t.lseek to earlier image, index=%d", index));
-	break;
+        index = i;
+        fd = fd_table[i];
+        thismin = start_offset_table[i];
+        thismax = thismin + length_table[i] - 1;
+        BX_DEBUG(("concat_image_t.lseek to earlier image, index=%d", index));
+        break;
       }
     }
   }
@@ -397,6 +545,19 @@ ssize_t concat_image_t::write(const void* buf, size_t count)
   if (!seek_was_last_op)
     BX_PANIC(("no seek before write"));
   return ::write(fd, (char*) buf, count);
+}
+
+bx_bool concat_image_t::save_state(const char *backup_fname)
+{
+  bx_bool ret = 1;
+  char tempfn[BX_PATHNAME_LEN];
+
+  for (int index = 0; index < maxfd; index++) {
+    sprintf(tempfn, "%s%d", backup_fname, index);
+    ret &= hdimage_backup_file(fd_table[index], tempfn);
+    if (ret == 0) break;
+  }
+  return ret;
 }
 
 /*** sparse_image_t function definitions ***/
@@ -924,6 +1085,48 @@ ssize_t sparse_image_t::write(const void* buf, size_t count)
   return total_written;
 }
 
+bx_bool sparse_image_t::save_state(const char *backup_fname)
+{
+  return hdimage_backup_file(fd, backup_fname);
+}
+
+void sparse_image_t::restore_state(const char *backup_fname)
+{
+  sparse_header_t temp_header;
+  char *temp_pathname;
+
+  int backup_fd = ::open(pathname, O_RDWR
+#ifdef O_BINARY
+   | O_BINARY
+#endif
+   );
+  if (backup_fd < 0) {
+    BX_PANIC(("Could not open sparse image backup"));
+    return;
+  }
+  if (::read(backup_fd, &temp_header, sizeof(header)) != sizeof(header)) {
+    BX_PANIC(("Could not read sparse image header"));
+    return;
+  }
+  if ((dtoh32(temp_header.magic) != SPARSE_HEADER_MAGIC) ||
+      (dtoh32(temp_header.version) != SPARSE_HEADER_VERSION)) {
+    BX_PANIC(("Could not detect sparse image header"));
+    return;
+  }
+  ::close(backup_fd);
+  temp_pathname = strdup(pathname);
+  close();
+  if (!hdimage_copy_file(backup_fname, temp_pathname)) {
+    BX_PANIC(("Failed to restore sparse image '%s'", temp_pathname));
+    free(temp_pathname);
+    return;
+  }
+  if (open(temp_pathname) < 0) {
+    BX_PANIC(("Failed to open restored image '%s'", temp_pathname));
+  }
+  free(temp_pathname);
+}
+
 #if DLL_HD_SUPPORT
 
 /*** dll_image_t function definitions ***/
@@ -1409,6 +1612,11 @@ ssize_t redolog_t::write(const void* buf, size_t count)
   return written;
 }
 
+bx_bool redolog_t::save_state(const char *backup_fname)
+{
+  return hdimage_backup_file(fd, backup_fname);
+}
+
 /*** growing_image_t function definitions ***/
 
 growing_image_t::growing_image_t()
@@ -1426,6 +1634,7 @@ int growing_image_t::open(const char* pathname)
   int filedes = redolog->open(pathname, REDOLOG_SUBTYPE_GROWING);
   hd_size = redolog->get_size();
   BX_INFO(("'growing' disk opened, growing file is '%s'", pathname));
+  imgpath = pathname;
   return filedes;
 }
 
@@ -1466,6 +1675,60 @@ ssize_t growing_image_t::write(const void* buf, size_t count)
   return (ret < 0) ? ret : count;
 }
 
+bx_bool growing_image_t::save_state(const char *backup_fname)
+{
+  return redolog->save_state(backup_fname);
+}
+
+void growing_image_t::restore_state(const char *backup_fname)
+{
+  redolog_t *temp_redolog = new redolog_t();
+  if (temp_redolog->open(backup_fname, REDOLOG_SUBTYPE_GROWING) < 0) {
+    delete temp_redolog;
+    BX_PANIC(("Can't open growing image backup '%s'", backup_fname));
+    return;
+  } else {
+    bx_bool okay = (temp_redolog->get_size() == redolog->get_size());
+    temp_redolog->close();
+    delete temp_redolog;
+    if (!okay) {
+      BX_PANIC(("size reported by backup doesn't match growing disk size"));
+      return;
+    }
+  }
+  redolog->close();
+  if (!hdimage_copy_file(backup_fname, imgpath)) {
+    BX_PANIC(("Failed to restore growing image '%s'", imgpath));
+    return;
+  }
+  if (open(imgpath) < 0) {
+    BX_PANIC(("Failed to open restored growing image '%s'", imgpath));
+  }
+}
+
+// compare hd_size and modification time of r/o disk and journal
+
+bx_bool coherency_check(default_image_t *ro_disk, redolog_t *redolog)
+{
+  Bit32u timestamp1, timestamp2;
+
+  if (ro_disk->hd_size != redolog->get_size()) {
+    BX_PANIC(("size reported by redolog doesn't match r/o disk size"));
+    return 0;
+  }
+  timestamp1 = ro_disk->get_timestamp();
+  timestamp2 = redolog->get_timestamp();
+  if (timestamp2 != 0) {
+    if (timestamp1 != timestamp2) {
+      BX_PANIC(("unexpected modification time of the r/o disk"));
+      return 0;
+    }
+  } else if (timestamp1 != 0) {
+    redolog->set_timestamp(timestamp1);
+  }
+  return 1;
+}
+
 /*** undoable_image_t function definitions ***/
 
 undoable_image_t::undoable_image_t(const char* _redolog_name)
@@ -1488,52 +1751,28 @@ undoable_image_t::~undoable_image_t()
 
 int undoable_image_t::open(const char* pathname)
 {
-  char *logname=NULL;
-  Bit32u timestamp1, timestamp2;
-
-  if (ro_disk->open(pathname, O_RDONLY)<0)
+  if (ro_disk->open(pathname, O_RDONLY) < 0)
     return -1;
 
   hd_size = ro_disk->hd_size;
-  // if redolog name was set
-  if (redolog_name != NULL) {
-    if (strcmp(redolog_name, "") != 0) {
-      logname = (char*)malloc(strlen(redolog_name) + 1);
-      strcpy(logname, redolog_name);
-    }
+
+  // If not set, we make up the redolog filename from the pathname
+  if (redolog_name == NULL) {
+    redolog_name = (char*)malloc(strlen(pathname) + UNDOABLE_REDOLOG_EXTENSION_LENGTH + 1);
+    sprintf(redolog_name, "%s%s", pathname, UNDOABLE_REDOLOG_EXTENSION);
   }
 
-  // Otherwise we make up the redolog filename from the pathname
-  if (logname == NULL) {
-    logname = (char*)malloc(strlen(pathname) + UNDOABLE_REDOLOG_EXTENSION_LENGTH + 1);
-    sprintf(logname, "%s%s", pathname, UNDOABLE_REDOLOG_EXTENSION);
-  }
-
-  if (redolog->open(logname,REDOLOG_SUBTYPE_UNDOABLE) < 0) {
-    if (redolog->create(logname, REDOLOG_SUBTYPE_UNDOABLE, hd_size) < 0) {
-      BX_PANIC(("Can't open or create redolog '%s'",logname));
+  if (redolog->open(redolog_name, REDOLOG_SUBTYPE_UNDOABLE) < 0) {
+    if (redolog->create(redolog_name, REDOLOG_SUBTYPE_UNDOABLE, hd_size) < 0) {
+      BX_PANIC(("Can't open or create redolog '%s'",redolog_name));
       return -1;
     }
   }
-  if (hd_size != redolog->get_size()) {
-    BX_PANIC(("size reported by redolog doesn't match r/o disk size"));
-    free(logname);
+  if (!coherency_check(ro_disk, redolog)) {
     return -1;
   }
-  timestamp1 = ro_disk->get_timestamp();
-  timestamp2 = redolog->get_timestamp();
-  if (timestamp2 != 0) {
-    if (timestamp1 != timestamp2) {
-      BX_PANIC(("unexpected modification time of the r/o disk"));
-      free(logname);
-      return -1;
-    }
-  } else if (timestamp1 != 0) {
-    redolog->set_timestamp(timestamp1);
-  }
 
-  BX_INFO(("'undoable' disk opened: ro-file is '%s', redolog is '%s'", pathname, logname));
-  free(logname);
+  BX_INFO(("'undoable' disk opened: ro-file is '%s', redolog is '%s'", pathname, redolog_name));
 
   return 0;
 }
@@ -1543,7 +1782,7 @@ void undoable_image_t::close()
   redolog->close();
   ro_disk->close();
 
-  if (redolog_name!=NULL)
+  if (redolog_name != NULL)
     free(redolog_name);
 }
 
@@ -1581,6 +1820,34 @@ ssize_t undoable_image_t::write(const void* buf, size_t count)
   return (ret < 0) ? ret : count;
 }
 
+bx_bool undoable_image_t::save_state(const char *backup_fname)
+{
+  return redolog->save_state(backup_fname);
+}
+
+void undoable_image_t::restore_state(const char *backup_fname)
+{
+  redolog_t *temp_redolog = new redolog_t();
+  if (temp_redolog->open(backup_fname, REDOLOG_SUBTYPE_UNDOABLE) < 0) {
+    delete temp_redolog;
+    BX_PANIC(("Can't open undoable redolog backup '%s'", backup_fname));
+    return;
+  } else {
+    bx_bool okay = coherency_check(ro_disk, temp_redolog);
+    temp_redolog->close();
+    delete temp_redolog;
+    if (!okay) return;
+  }
+  redolog->close();
+  if (!hdimage_copy_file(backup_fname, redolog_name)) {
+    BX_PANIC(("Failed to restore undoable redolog '%s'", redolog_name));
+  } else {
+    if (redolog->open(redolog_name, REDOLOG_SUBTYPE_UNDOABLE) < 0) {
+      BX_PANIC(("Can't open restored undoable redolog '%s'", redolog_name));
+    }
+  }
+}
+
 /*** volatile_image_t function definitions ***/
 
 volatile_image_t::volatile_image_t(const char* _redolog_name)
@@ -1606,6 +1873,7 @@ int volatile_image_t::open(const char* pathname)
 {
   int filedes;
   const char *logname=NULL;
+  Bit32u timestamp;
 
   if (ro_disk->open(pathname, O_RDONLY)<0)
     return -1;
@@ -1643,6 +1911,10 @@ int volatile_image_t::open(const char* pathname)
   // on unix it is legal to delete an open file
   unlink(redolog_temp);
 #endif
+
+  // timestamp required for save/restore support
+  timestamp = ro_disk->get_timestamp();
+  redolog->set_timestamp(timestamp);
 
   BX_INFO(("'volatile' disk opened: ro-file is '%s', redolog is '%s'", pathname, redolog_temp));
 
@@ -1697,4 +1969,25 @@ ssize_t volatile_image_t::write(const void* buf, size_t count)
     n += 512;
   }
   return (ret < 0) ? ret : count;
+}
+
+bx_bool volatile_image_t::save_state(const char *backup_fname)
+{
+  return redolog->save_state(backup_fname);
+}
+
+void volatile_image_t::restore_state(const char *backup_fname)
+{
+  redolog_t *temp_redolog = new redolog_t();
+  if (temp_redolog->open(backup_fname, REDOLOG_SUBTYPE_VOLATILE) < 0) {
+    delete temp_redolog;
+    BX_PANIC(("Can't open volatile redolog backup '%s'", backup_fname));
+    return;
+  } else {
+    bx_bool okay = coherency_check(ro_disk, temp_redolog);
+    temp_redolog->close();
+    delete temp_redolog;
+    if (!okay) return;
+  }
+  BX_ERROR(("volatile_image_t::restore_state(): UNIMPLEMENTED"));
 }

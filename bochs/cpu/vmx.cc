@@ -429,7 +429,7 @@ VMX_error_code BX_CPU_C::VMenterLoadCheckVmControls(void)
      }
 
      if (! (vm->vmexec_ctrls3 & VMX_VM_EXEC_CTRL3_VIRTUALIZE_APIC_ACCESSES)) {
-       Bit8u tpr_shadow = (VMX_Read_VTPR() >> 4) & 0xf;
+       Bit8u tpr_shadow = (VMX_Read_Virtual_APIC(BX_LAPIC_TPR) >> 4) & 0xf;
        if (vm->vm_tpr_threshold > tpr_shadow) {
          BX_ERROR(("VMFAIL: VMCS EXEC CTRL: TPR threshold > TPR shadow"));
          return VMXERR_VMENTRY_INVALID_VM_CONTROL_FIELD;
@@ -669,9 +669,11 @@ VMX_error_code BX_CPU_C::VMenterLoadCheckVmControls(void)
         }
      }
 
-     if (error_code & 0x7fff0000) {
-        BX_ERROR(("VMFAIL: VMENTRY bad error code 0x%08x for injected event %d", error_code, vector));
-        return VMXERR_VMENTRY_INVALID_VM_CONTROL_FIELD;
+     if (push_error) {
+        if (error_code & 0xffff0000) {
+          BX_ERROR(("VMFAIL: VMENTRY bad error code 0x%08x for injected event %d", error_code, vector));
+          return VMXERR_VMENTRY_INVALID_VM_CONTROL_FIELD;
+        }
      }
   }
 
@@ -1509,6 +1511,12 @@ Bit32u BX_CPU_C::VMenterLoadCheckGuestState(Bit64u *qualification)
 #if BX_SUPPORT_X86_64
 #if BX_SUPPORT_VMX >= 2
   // modify EFER.LMA / EFER.LME before setting CR4
+
+  // It is recommended that 64-bit VMM software use the 1-settings of the "load IA32_EFER"
+  // VM entry control and the "save IA32_EFER" VM-exit control. If VMentry is establishing
+  // CR0.PG=0 and if the "IA-32e mode guest" and "load IA32_EFER" VM entry controls are
+  // both 0, VM entry leaves IA32_EFER.LME unmodified (i.e., the host value will persist
+  // in the guest) -- Quote from Intel SDM
   if (vmentry_ctrls & VMX_VMENTRY_CTRL1_LOAD_EFER_MSR) {
      BX_CPU_THIS_PTR efer.set32((Bit32u) guest.efer_msr);
   }

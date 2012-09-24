@@ -62,7 +62,7 @@ system and applications that Bochs is simulating.
 host platform is, Bochs still simulates x86 hardware.  In other words, it
 does not depend on the native instructions of the host machine at all.
 This is both a strength and a weakness, and it's the major difference between
-Bochs and many other x86 emulation software such as plex86, VMware, etc.
+Bochs and many other x86 emulation software such as VirtualBox, VMware, etc.
 Because Bochs uses software simulation for every single x86 instruction, it
 can simulate a Windows application on an Alpha or Sun workstation.  However,
 the downside of Bochs' approach is simulation performance.  To model the
@@ -80,8 +80,7 @@ the simulator typically takes control and simulates that code in
 software at much slower speed, just like Bochs does.
 </para>
 </footnote>, but they are neither portable to non-x86 platforms nor open
-source.  The <ulink url="http://savannah.nongnu.org/projects/plex86">Plex86</ulink> project is
-working toward an open-source x86 simulator with virtualization.
+source.
 </para>
 
 <para>
@@ -105,13 +104,14 @@ operating system has not been written.
 <para>
 <!-- really more like Background or Bochs History, but maybe it doesn't need its own section unless it gets to 3 paras or so  -->
 
-Bochs was written by Kevin Lawton starting in 1994.  It began as a
-commercial product, which you could buy with source code for ...
+Bochs was written by Kevin Lawton starting in 1994. It started as a program with a
+commercial license, at the price of 25 USD, for use as-is. If a user needed to link
+it to other software, that user would have to negotiate a special license.
 &NEEDHELP; <footnote>
 <para>
 We need a Bochs historian to help out here.  For background, it would be
-interesting to know how much Bochs used to cost and what it was used for.  I
-thought I saw an interview out there somewhere where Kevin says why he started
+interesting to know how much Bochs sources used to cost and what it was used for.
+I thought I saw an interview out there somewhere where Kevin says why he started
 it and some more background information.
 </para>
 </footnote> Finally, in March 2000, MandrakeSoft (now called
@@ -191,7 +191,7 @@ Perhaps all you want to do is run one or two applications native to Microsoft Wi
 on GNU/Linux, or vice-versa.  Perhaps your biggest concern is speed and performance.
 Maybe you don't mind tweaking a few files here and there when you want another application
 to work in that setting.
-In cases where the objective is to simulate x86 hardware on an x86, Plex86, Wine, and
+In cases where the objective is to simulate x86 hardware on an x86, VirtualBox, Wine, and
 VMware might be your best options.</para>
 
 <para>
@@ -243,7 +243,7 @@ Bochs only provides you with the "virtual hardware", and it is up to you to do t
 If you are running on x86 hardware, you have a range of choices.
 Check the installation section for your host platform to see what options
 Bochs supports on your platform.  If the most important factor is speed,
-you may want to try a virtualization product instead of Bochs (VMware, VirtualBox, plex86).
+you may want to try a virtualization product instead of Bochs (VMware, VirtualBox, QEMU).
 </para>
 
 <para>
@@ -278,7 +278,12 @@ Complete text of the GNU LGPL is included with the source code in a file
 called COPYING, and is also <ulink url="http://www.gnu.org/licenses/lgpl.html">here</ulink>.
 </para>
 </footnote>.  The following text appears at the
-top of every source code file in the Bochs distribution:
+top of every source code file released under the LGPL in the Bochs distribution:
+<footnote><para>
+Parts of Bochs have specific licenses which are compatible with the
+GNU Lesser General Public License. Hence each source file contains its
+own licensing information.
+</para></footnote>
 <programlisting>
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -351,13 +356,7 @@ currently work with.
   <row>
     <entry>P6 and later CPU Emulation</entry>
     <entry>Yes</entry>
-    <entry>Bochs can be configured to emulate any P6 family processor including optional MMX and SSE instructions.
-    </entry>
-  </row>
-  <row>
-    <entry>Pentium 4 Emulation</entry>
-    <entry>Incomplete</entry>
-    <entry>A few Pentium 4 features are incomplete, such as an on-chip APIC extensions (XAPIC) for SMP simulation.
+    <entry>Bochs can be configured to emulate any P6 family processor including optional MMX and SSEx instructions.
     </entry>
   </row>
   <row>
@@ -390,7 +389,8 @@ currently work with.
     <entry>Yes</entry>
     <entry>Implements ElTorito, EDD v3.0, basic APM feature, PCIBIOS features
     and the PCI interrupt routing table. The latest version of the Bochs BIOS
-    has a 32-bit init for ACPI, SMM and SMP.
+    has a 32-bit init for ACPI, SMM and SMP. Bochs also known to work with recent
+    <ulink url="http://www.seabios.org/">SeaBIOS</ulink> images.
     </entry>
   </row>
   <row>
@@ -417,7 +417,7 @@ currently work with.
     <entry>Floppy disk</entry>
     <entry>Yes</entry>
     <entry>Supports floppy disk images on all platforms: 2.88M 3.5", 1.44M 3.5", 1.2M 5.25",
-    720K 3.5" and 360K 5.25". On Unix and Windows 9x/NT/2000/XP, Bochs can access the
+    720K 3.5" and 360K 5.25". On Unix and Windows NT/2000/XP, Bochs can access the
     physical floppy drive. It is also possible to use a local directory as VFAT media
     (1.44M only).
     </entry>
@@ -436,7 +436,7 @@ currently work with.
     <entry>Yes</entry>
     <entry>Emulates ATA-6/IDE hard drives via image files.  Physical
     hard disk access is supported on some architecture, but NOT recommended, primarily for safety reasons.
-    Hard disks up to 127GB are supported, on any platform that support large files access.
+    With LBA48 support, hard disks up to 255TB are supported, on any platform that support large files access.
     It is also possible to use a local directory as VFAT drive.
     </entry>
   </row>
@@ -446,8 +446,7 @@ currently work with.
     <entry>Emulates ATAPI-4/IDE CD-ROM.  The CD-ROMs can read from an ISO disk image
     on any platform. On Windows (9x/ME/NT/2000/XP), Linux, SunOS, FreeBSD,
     NetBSD, OpenBSD, Amiga/MorphOS and MacOSX, Bochs can read from the
-    physical CD-ROM drive. Starting with version 1.4, Bochs is even able to boot from
-    a bootable CD or bootable ISO image.
+    physical CD-ROM drive. The Bochs BIOS supports booting from the first CD-ROM drive.
     </entry>
   </row>
   <row>
@@ -466,18 +465,20 @@ currently work with.
     </entry>
   </row>
   <row>
-    <entry>Sound Blaster</entry>
+    <entry>Sound card</entry>
     <entry>Yes</entry>
-    <entry>Emulates a Sound Blaster 16 card (ISA, no plug&amp;play). On Windows, Linux, FreeBSD, MacOS 9 and
-    MacOSX, the output can be sent to the host computer's sound system, see
-    <xref linkend="sb16-emulation"> for details.
+    <entry>Emulates a Sound Blaster 16 card (ISA, no plug&amp;play) or an ES1370 PCI
+    card. On Windows, Linux, FreeBSD, MacOS 9 and MacOSX, the output can be sent to
+    the host computer's sound system. For the SB16, see <xref linkend="sb16-emulation">
+    for details.
     </entry>
   </row>
   <row>
     <entry>Network card</entry>
     <entry>Yes</entry>
-    <entry>Emulates an NE2000 compatible network card.  On Windows NT/2000,
-    Linux, FreeBSD, and NetBSD, Bochs will forward packets to and from the
+    <entry>Emulates an NE2000 compatible network card (ISA / PCI) or an Intel(R)
+    82540EM Gigabit Ethernet adapter (PCI). On Windows NT/2000, Linux, FreeBSD,
+    and NetBSD, Bochs will forward packets to and from the
     operating system so that the guest OS can talk on the physical network.
     Unfortunately, on some platforms the guest OS can talk to any machine on
     the network BUT NOT the host machine.  On Windows and on systems that
@@ -532,7 +533,7 @@ currently work with.
     <entry>Plugins</entry>
     <entry>Yes</entry>
     <entry>Compiling gui and devices as plugins is supported on Linux, MacOS X,
-    Solaris, Cygwin and MinGW/MSYS.</entry>
+    Solaris, Cygwin, MinGW/MSYS and VS2008Ex (workspace provided).</entry>
   </row>
   <row>
     <entry>PIC</entry>
@@ -556,7 +557,7 @@ currently work with.
   <row>
     <entry>Simulate a Multiprocessor</entry>
     <entry>Yes</entry>
-    <entry>Bochs can be configured to simulate up to 8 processors.  This
+    <entry>Bochs can be configured to simulate up to 255 processor threads.  This
     feature is still experimental, but it can boot several Linux or Windows guests
     with SMP support.  Please note that this does NOT mean that Bochs can run
     faster on a physical SMP machine.
@@ -654,19 +655,6 @@ code that displays the Bochs VGA screen and handles keyboard and mouse events.
       <entry>amigaos</entry>
     </row>
 
-    <row>
-      <entry>OS/2</entry>
-      <entry>
-        Nick Behnken used PE2LX to translate David Ross' Win32
-        port to an OS/2 program. This hasn't been updated for a long time,
-        and Nick Behnken's page seems to be inactive.
-        Also, Craig Ballantyne ported Bochs to OS/2, but his web page has
-        disappeared and his port has not been updated since March 2000.
-        If you want to bring the OS/2 port up to date, contact the &devlist;.
-      </entry>
-      <entry>???</entry>
-    </row>
-
   </tbody>
   </tgroup>
 </table>
@@ -735,7 +723,7 @@ code that displays the Bochs VGA screen and handles keyboard and mouse events.
      Because Bochs emulates every x86 instruction and all the devices in a PC
      system, it does not reach high emulation speeds. Users who have an x86
      processor and want the highest emulation speeds may want to consider PC
-     virtualization software such as plex86 or VirtualBox (free software).
+     virtualization software such as Vmware or VirtualBox (free software).
      Another related project is <ulink url="http://www.nongnu.org/qemu/">QEMU</ulink>.
      </para></answer>
   </qandaentry>
@@ -805,8 +793,9 @@ code that displays the Bochs VGA screen and handles keyboard and mouse events.
      Does Bochs support a sound device?
      </para></question>
      <answer><para>
-       Yes, there is Sound Blaster emulation support for most common operation systems,
-       see <xref linkend="sb16-emulation"> for details.
+       Yes, Bochs emulates a Sound Blaster 16 card (ISA, no plug&amp;play) or
+       an ES1370 PCI. Output to the host sound system is implemented for some
+       platforms. See <xref linkend="features"> for details.
      </para></answer>
   </qandaentry>
 
@@ -815,9 +804,9 @@ code that displays the Bochs VGA screen and handles keyboard and mouse events.
      Does Bochs support a network card?
      </para></question>
      <answer><para>
-     Yes.  Bochs contains a model of an NE2000 compatible network card.
-     Networking is not supported on all platforms.  See
-     <xref linkend="features"> for details.
+     Yes.  Bochs emulates an NE2000 compatible network card (ISA / PCI) or an
+     Intel(R) 82540EM Gigabit Ethernet adapter (PCI). Networking is not supported
+     on all platforms. See <xref linkend="features"> for details.
      </para></answer>
   </qandaentry>
 
@@ -1031,8 +1020,8 @@ for instructions.
 </tip>
 
 <para>
-The SVN checkout process (above) gives you a directory called bochs that
-contains the very latest source code.  I will refer to this directory
+The SVN checkout process (above) gives you a directory called <filename>bochs</filename>
+that contains the very latest source code.  I will refer to this directory
 as &bochsdir;.  In each subdirectory directory there's also a
 directory called ".svn" which tells the SVN software where the code was checked
 out, what version you have, and where to go for future updates.
@@ -1127,7 +1116,7 @@ any release since March 2000.  The command is
 <screen>
   user$ <command>svn co https://bochs.svn.sourceforge.net/svnroot/bochs/tags/<replaceable>tagname</replaceable> bochs</command>
 </screen>
-The tag tells which release you want, and it can be one of the following:
+The <replaceable>tagname</replaceable> tells which release you want, and it can be one of the following:
 
 <table frame="all">
 <title>Bochs Release Tags</title>
@@ -1139,6 +1128,14 @@ The tag tells which release you want, and it can be one of the following:
       </row>
     </thead>
     <tbody>
+      <row>
+        <entry>2.5.1 (bugfix)</entry>
+        <entry>REL_2_5_1_FINAL</entry>
+      </row>
+      <row>
+        <entry>2.5</entry>
+        <entry>REL_2_5_FINAL</entry>
+      </row>
       <row>
         <entry>2.4.6</entry>
         <entry>REL_2_4_6_FINAL</entry>
@@ -1319,6 +1316,7 @@ DLX Linux screenshot.
 <row><entry>bximage.exe </entry> <entry> tool for making new disk images </entry> </row>
 <row><entry>CHANGES.txt </entry> <entry> what has changed between versions </entry> </row>
 <row><entry>COPYING.txt </entry> <entry> copy of the LGPL license </entry> </row>
+<row><entry>LICENSE.txt </entry> <entry> Bochs license information </entry> </row>
 <row><entry>README.txt </entry> <entry> the read-me file from the source distribution. </entry> </row>
 <row><entry>TODO.txt </entry> <entry> the TODO file from the source distribution. </entry> </row>
 <row><entry>niclist.exe </entry> <entry> tool to find out the network interface name </entry> </row>
@@ -1493,6 +1491,7 @@ description of each one.
 
 <row><entry>/usr/share/doc/bochs/CHANGES</entry> <entry> what has changed between versions </entry> </row>
 <row><entry>/usr/share/doc/bochs/COPYING</entry> <entry> copy of the LGPL license </entry> </row>
+<row><entry>/usr/share/doc/bochs/LICENSE</entry> <entry> Bochs license information </entry> </row>
 <row><entry>/usr/share/doc/bochs/README</entry> <entry> the read-me file from the source distribution. </entry> </row>
 <row><entry>/usr/share/doc/bochs/TODO</entry> <entry> the TODO file from the source distribution. </entry> </row>
 <row><entry>/usr/bin/bochs </entry> <entry> the main Bochs executable </entry> </row>
@@ -1815,7 +1814,7 @@ display libraries, and then choose between them at runtime with the
 <link linkend="bochsopt-displaylibrary">display_library option</link>
 in the configuration file. Or, you can
 let the configure script detect which libraries are on your system
-and use them all, by configuring with --with-all-libs.
+and use them all, by configuring with <option>--with-all-libs</option>.
 </para>
 <note>
 <para>
@@ -1940,7 +1939,7 @@ In Bochs 1.3 and before, the X11 GUI was always the default.
       <entry>--with-svga</entry>
       <entry>Use SVGALIB library for Linux.  This allows a full-screen
         text and graphics display without X windows.  The SVGALIB port
-	was written by Igor Popik.
+        was written by Igor Popik.
         </entry>
     </row>
     <row>
@@ -1955,8 +1954,8 @@ In Bochs 1.3 and before, the X11 GUI was always the default.
       Automatically detect which libraries are installed on your system
       and enable them.  This option is still experimental; it might
       enable libraries that are not usable and cause the compile to fail.
-      If you have trouble, just list the --with-* options for the specific
-      display libraries that you want.
+      If you have trouble, just list the <option>--with-*</option> options
+      for the specific display libraries that you want.
       </entry>
     </row>
   </tbody>
@@ -1965,15 +1964,11 @@ In Bochs 1.3 and before, the X11 GUI was always the default.
 
 <para>
 The remaining options can generally be used with any GUI.  For each option
-such as --enable-cdrom, you can also write --disable-cdrom to explicitly
-turn it off.
+such as <option>--enable-cdrom</option>, you can also write <option>--disable-cdrom</option>
+to explicitly turn it off.
 </para>
 
-<para>
-&NEEDHELP; Link CPU link to the proper row, not to the beginning of the whole table, as it is now.
-</para>
-
-<table><title>Configure Options</title>
+<table id="configure-options"><title>Configure Options</title>
 <tgroup cols="3" align="left" colsep="1" rowsep="1">
   <thead>
     <row>
@@ -1983,8 +1978,8 @@ turn it off.
    </row>
   </thead>
   <tbody>
-    <row id="configure-enable-cpu-level">
-      <entry>--enable-cpu-level={<option>3,4,5,6</option>}</entry>
+    <row>
+      <entry><anchor id="configure-enable-cpu-level">--enable-cpu-level={<option>3,4,5,6</option>}</entry>
       <entry>6</entry>
       <entry>
       Select which CPU level to emulate.  Choices are 3,4,5,6 which mean to
@@ -2013,6 +2008,11 @@ turn it off.
       </entry>
     </row>
     <row>
+      <entry>--enable-3dnow</entry>
+      <entry>no</entry>
+      <entry>3DNow! instruction set support (incomplete)</entry>
+    </row>
+    <row>
       <entry>--enable-x86-64</entry>
       <entry>no</entry>
       <entry>
@@ -2023,6 +2023,11 @@ turn it off.
       <entry>--enable-vmx</entry>
       <entry>no</entry>
       <entry>Intel Virtualization Extensions (VMX) support</entry>
+    </row>
+    <row>
+      <entry>--enable-svm</entry>
+      <entry>no</entry>
+      <entry>AMD SVM (Secure Virtual Machine) extensions emulation support</entry>
     </row>
     <row>
       <entry>--enable-avx</entry>
@@ -2044,6 +2049,11 @@ turn it off.
       <entry>MONITOR/MWAIT instructions support (still experimental)</entry>
     </row>
     <row>
+      <entry>--enable-alignment-check</entry>
+      <entry>yes if cpu level &gt;= 4</entry>
+      <entry>support for alignment check in the CPU and #AC exception</entry>
+    </row>
+    <row>
       <entry>--enable-misaligned-sse</entry>
       <entry>no</entry>
       <entry>support for AMD's misaligned SSE extension</entry>
@@ -2060,17 +2070,25 @@ turn it off.
       <entry>support for guest physical address larger than 32 bit</entry>
     </row>
     <row>
+      <entry>--enable-a20-pin</entry>
+      <entry>yes</entry>
+      <entry>support for the A20 pin</entry>
+    </row>
+    <row>
+      <entry>--enable-large-ramfile</entry>
+      <entry>yes</entry>
+      <entry>support for guest memory larger than the host supports</entry>
+    </row>
+    <row>
       <entry>--enable-cdrom</entry>
       <entry>yes</entry>
       <entry>
       Enable use of a real CDROM.  The cdrom emulation is always present, and
       emulates a drive without media by default.  You can use this option to
       compile in support for accessing the media in your workstation's cdrom
-      drive.  The supported platforms are Linux, Solaris, FreeBSD, OpenBSD, and Windows.
-      For other platforms, a small amount of code specific to your platform
-      must be written.  The module iodev/cdrom.cc is the place to add more
-      support.  For the most part, you need to figure out the right set of
-      ioctl() calls.
+      drive.  The supported platforms are Linux, Solaris, FreeBSD, OpenBSD,
+      MacOS X and Windows. For other platforms, a small amount of code specific
+      to your platform must be written.
       </entry>
     </row>
     <row>
@@ -2193,6 +2211,14 @@ turn it off.
       </entry>
     </row>
     <row>
+      <entry>--enable-debugger-gui</entry>
+      <entry>yes if debugger is on</entry>
+      <entry>
+      Enable support for the gui frontend of the Bochs debugger. This feature
+      is supported on Windows hosts and on hosts with GTK2 installed.
+      </entry>
+    </row>
+    <row>
       <entry>--enable-readline</entry>
       <entry>detected by configure</entry>
       <entry>
@@ -2201,31 +2227,21 @@ turn it off.
       </entry>
     </row>
     <row>
+      <entry>--enable-gdb-stub</entry>
+      <entry>no</entry>
+      <entry>
+      Enable support for the remote GDB stub. See <link linkend="debugging-with-gdb">Using Bochs and the remote GDB stub</link>.
+      NOTE: This feature cannot be used if the Bochs debugger is also enabled.
+      </entry>
+    </row>
+    <row>
       <entry>--enable-disasm</entry>
       <entry>yes</entry>
       <entry>Compile in support for built-in disassembler.  Bochs has
           a built-in disassembler, which is useful if you either
-          run the built-in debugger (--enable-debugger), or want
+          run the built-in debugger (<option>--enable-debugger</option>), or want
           disassembly of the current instruction when there is a
           panic in bochs.</entry>
-    </row>
-    <row>
-      <entry>--enable-cpp</entry>
-      <entry>no</entry>
-      <entry>
-      Use .cpp as C++ suffix. Renames all the .cc files to .cpp for use with
-      compilers which want that, like older MS C++ compilers. Don't use this
-      option unless you know you need it.
-      </entry>
-    </row>
-    <row>
-      <entry>--enable-docbook</entry>
-      <entry>detected</entry>
-      <entry>
-      Build the docbook documentation in doc/docbook.  The configure
-      script will enable this option automatically if you have a program
-      called docbook2html installed.
-      </entry>
     </row>
     <row>
       <entry>--enable-iodebug</entry>
@@ -2235,8 +2251,8 @@ turn it off.
       using I/O ports, so that software running in the guest OS can access
       features of the debugger.  You only want this option if you are
       developing guest OS code for use in Bochs.  In other words, most people
-      don't.  Also, it should only be used with --enable-debugger.  See the
-      <ulink url="http://bochs.sourceforge.net/doc/docbook/development/iodebug.html">
+      don't.  Also, it should only be used with <option>--enable-debugger</option>.
+      See the <ulink url="http://bochs.sourceforge.net/doc/docbook/development/iodebug.html">
       developer documentation</ulink> for details.
       </entry>
     </row>
@@ -2250,8 +2266,8 @@ turn it off.
       <entry>--enable-pcidev</entry>
       <entry>no</entry>
       <entry>
-        Enable PCI host device mapping support. This requires --enable-pci
-        to be set as well as Linux 2.4 or 2.6 as host.
+        Enable PCI host device mapping support. This requires <option>--enable-pci</option>
+        to be set as well as Linux 2.4, 2.6 or 3.x as host.
       </entry>
     </row>
     <row>
@@ -2279,6 +2295,23 @@ turn it off.
       </entry>
     </row>
     <row>
+      <entry>--enable-raw-serial</entry>
+      <entry>no</entry>
+      <entry>
+        Enable support for the serial port emulation to access to the host's
+        serial port. This feature is partly implemented for Windows hosts only.
+      </entry>
+    </row>
+    <row>
+      <entry>--enable-docbook</entry>
+      <entry>detected</entry>
+      <entry>
+      Build the docbook documentation in doc/docbook.  The configure
+      script will enable this option automatically if you have a program
+      called docbook2html installed.
+      </entry>
+    </row>
+    <row>
       <entry>--enable-instrumentation=<option>directory</option></entry>
       <entry>no</entry>
       <entry>
@@ -2299,10 +2332,36 @@ turn it off.
     </row>
     <row>
       <entry>--enable-show-ips</entry>
-      <entry>no</entry>
+      <entry>yes</entry>
       <entry>
       Enables logging of measured IPS, see the <command>ips</command> parameter
-      of the <link linkend="bochsopt-cpu">cpu option</link>.
+      of the <link linkend="bochsopt-cpu-ips">cpu option</link>.
+      </entry>
+    </row>
+    <row>
+      <entry>--enable-logging</entry>
+      <entry>yes</entry>
+      <entry>
+      By default, Bochs generates logfile output that can be configured with
+      bochsrc options and at runtime. Use <option>--disable-logging</option>
+      to turn off this feature completely.
+      </entry>
+    </row>
+    <row>
+      <entry>--enable-assert-checks</entry>
+      <entry>yes if debugger is on</entry>
+      <entry>
+      BX_ASSERT event causes a panic on assertion failure if enabled (logging
+      feature must be enabled, too).
+      </entry>
+    </row>
+    <row>
+      <entry>--enable-cpp</entry>
+      <entry>no</entry>
+      <entry>
+      Use .cpp as C++ suffix. Renames all the .cc files to .cpp for use with
+      compilers which want that, like older MS C++ compilers. Don't use this
+      option unless you know you need it.
       </entry>
     </row>
   </tbody>
@@ -2454,19 +2513,19 @@ and <filename>niclist.exe</filename>.
 Using workspaces is easy and intuitive, but there is one caveat. The workspaces
 come directly out of a ZIP file in <filename>build/win32/vs2008ex-workspace.zip</filename>,
 and they are not controlled by the configure script. When you compile with certain
-configure options (e.g. --with-sdl) you need to link with additional libraries.
-For now you must add them to the VC++ workspace by hand. In version 2.0, we have improved
-the situation considerably by adding #if...#endif around every optional file
-and including nearly every Bochs source file in the workspace.  This solves the
+configure options (e.g. <option>--with-sdl</option>) you need to link with additional
+libraries. For now you must add them to the VC++ workspace by hand. In version 2.0,
+we have improved the situation considerably by adding #if...#endif around every optional
+file and including nearly every Bochs source file in the workspace.  This solves the
 problem of having to manually add source files to the workspace when you turn
-on configure options such as --enable-debugger.  The problem of adding
+on configure options such as <option>--enable-debugger</option>. The problem of adding
 link libraries remains unresolved.
 </para>
 
 <tip>
 <para>
-To compile with the Bochs debugger enabled, add "--enable-debugger" to the
-configure line in <filename>.conf.win32-vcpp</filename> before running it.
+To compile with the Bochs debugger enabled, add <option>--enable-debugger</option>
+to the configure line in <filename>.conf.win32-vcpp</filename> before running it.
 No modifications to the workspace are necessary.
 </para> </tip>
 
@@ -2639,7 +2698,7 @@ Bochs GUIs. Use <option>--with-x11</option> for X windows,
 <para>
 To compile in Microsoft VS2008Ex, you have to configure on a different system
 (see <link linkend="compiling-win32">Compiling on Win32 with Microsoft VC++</link>).
-Before running the configure script, you have to add <command>--with-sdl</command>
+Before running the configure script, you have to add <option>--with-sdl</option>
 to the shortcut script. If you have already configured, you can set <command>BX_WITH_SDL
 </command> to 1 in <filename>config.h</filename>.
 </para>
@@ -2927,7 +2986,9 @@ supported is 2048MB.
 </para>
 
 <note><para>
-Due to limitations in the host OS, Bochs fails to allocated even 1024MB on most systems.
+Due to limitations in the host OS, Bochs fails to allocate more than 1024MB on most 32-bit systems.
+In order to overcome this problem configure and build Bochs with <option>--enable-large-ramfile</option>
+option.
 </para></note>
 </section>
 
@@ -2966,7 +3027,7 @@ to workaround WinNT installation and boot issues.
 <para><command>mwait_is_nop</command></para>
 <para>
 When this option is enabled MWAIT will not put the CPU into a sleep state.
-This option exists only if Bochs compiled with --enable-monitor-mwait.
+This option exists only if Bochs compiled with <option>--enable-monitor-mwait</option>.
 </para>
 <para><command>msrs</command></para>
 <para>
@@ -2979,7 +3040,7 @@ Ignore MSR references that Bochs does not understand; print a warning message
 instead of generating #GP exception. This option is enabled by default but 
 will not be avaiable if configurable MSRs are enabled.
 </para>
-<para><command>ips</command></para>
+<para><anchor id="bochsopt-cpu-ips"><command>ips</command></para>
 <para>
 Emulated Instructions Per Second.  This is the number of IPS that Bochs is
 capable of running on your machine.  You can recompile Bochs with
@@ -2994,7 +3055,7 @@ simulation.  For example, changing IPS affects the frequency of VGA updates,
 the duration of time before a key starts to autorepeat, and the measurement
 of BogoMips and other benchmarks.  The table below lists some typical
 IPS settings for different machines<footnote><para>IPS measurements depend on
-OS and compiler configuration in addition to processor clock
+OS and compiler configuration in addition to host processor clock
 speed.</para></footnote>.
 </para>
 
@@ -3081,37 +3142,37 @@ This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 <para><command>avx</command></para>
 <para>
 Select AVX/AVX2 instruction set support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>avx_f16c</command></para>
 <para>
 Select AVX float16 convert instructions support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>avx_fma</command></para>
 <para>
 Select AVX fused multiply add (FMA) instructions support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>bmi</command></para>
 <para>
 Select BMI1/BMI2 instructions support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>fma4</command></para>
 <para>
 Select AMD four operand FMA instructions support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>xop</command></para>
 <para>
 Select AMD XOP instructions support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>tbm</command></para>
 <para>
 Select AMD TBM instructions support.
-This option exists only if Bochs compiled with --enable-avx option.
+This option exists only if Bochs compiled with <option>--enable-avx</option> option.
 </para>
 <para><command>x86_64</command></para>
 <para>
@@ -3133,25 +3194,30 @@ This option exists only if Bochs compiled with x86-64 support.
 Enable Supervisor Mode Execution Protection (SMEP) support.
 This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
 </para>
+<para><command>smap</command></para>
+<para>
+Enable Supervisor Mode Access Protection (SMAP) support.
+This option exists only if Bochs compiled with BX_CPU_LEVEL >= 6.
+</para>
 <para><command>mwait</command></para>
 <para>
 Select MONITOR/MWAIT instructions support.
-This option exists only if Bochs compiled with --enable-monitor-mwait.
+This option exists only if Bochs compiled with <option>--enable-monitor-mwait</option>.
 </para>
 <para><command>vmx</command></para>
 <para>
 Select VMX extensions emulation support.
-This option exists only if Bochs compiled with --enable-vmx option.
+This option exists only if Bochs compiled with <option>--enable-vmx</option> option.
 </para>
 <para><command>svm</command></para>
 <para>
 Select AMD SVM (Secure Virtual Machine) extensions emulation support.
-This option exists only if Bochs compiled with --enable-vmx option.
+This option exists only if Bochs compiled with <option>--enable-svm</option> option.
 </para>
 <para><command>family</command></para>
 <para>
 Set family information returned by CPUID. Default family value determined
-by configure option --enable-cpu-level.
+by configure option <link linkend="configure-enable-cpu-level">--enable-cpu-level</link>.
 </para>
 <para><command>model</command></para>
 <para>
@@ -3548,8 +3614,8 @@ Examples:
 <para>
 The display library is the code that displays the Bochs VGA screen.  Bochs
 has a selection of about 10 different display library implementations for
-different platforms.  If you run configure with multiple --with-* options,
-the display_library option lets you choose which one you want to run with.
+different platforms.  If you run configure with multiple <option>--with-*</option>
+options, the display_library option lets you choose which one you want to run with.
 If you do not use a display_library line, Bochs will choose a default for
 you.
 </para>
@@ -3571,7 +3637,7 @@ Some display libraries now support specific options to control their
 behaviour. These options are supported by more than one display library:
 <screen>
   "gui_debug"   - use GTK debugger gui (sdl, x) / Win32 debugger gui (sdl, win32)
-  "hideIPS"     - disable IPS output in status bar (sdl, wx, x)
+  "hideIPS"     - disable IPS output in status bar (rfb, sdl, win32, wx, x)
   "nokeyrepeat" - turn off host keyboard repeat (sdl, win32, x)
 </screen>
 See the examples below for other currently supported options.
@@ -3888,7 +3954,7 @@ are in the usual "property=value" format.
    dmatimer: Microseconds per second for a DMA cycle. Make it smaller to fix
    non-continuous sound. 750000 is usually a good value. This needs a reasonably
    correct setting for the <command>ips</command> parameter of the
-   <link linkend="bochsopt-cpu">cpu option</link>. It is possible to adjust the
+   <link linkend="bochsopt-cpu-ips">cpu option</link>. It is possible to adjust the
    dmatimer value at runtime.
    </para></listitem>
  </itemizedlist>
@@ -4353,8 +4419,9 @@ Example:
   pcipnic: enabled=1, mac=b0:c4:20:00:00:00, ethmod=vnet
 </screen>
 To support the Bochs/Etherboot pseudo-NIC, Bochs must be compiled with the
---enable-pnic configure option. It accepts the same syntax (for mac, ethmod,
-ethdev, script, bootrom) and supports the same networking modules as the NE2000 adapter.
+<option>--enable-pnic</option> configure option. It accepts the same syntax (for mac,
+ethmod, ethdev, script, bootrom) and supports the same networking modules as the
+NE2000 adapter.
 </para>
 </section>
 
@@ -4365,8 +4432,9 @@ Example:
   e1000: enabled=1, mac=52:54:00:12:34:56, ethmod=slirp, script=/usr/local/bin/slirp
 </screen>
 To support the Intel(R) 82540EM Gigabit Ethernet adapter, Bochs must be compiled
-with the --enable-e1000 configure option. It accepts the same syntax (for mac, ethmod,
-ethdev, script, bootrom) and supports the same networking modules as the NE2000 adapter.
+with the <option>--enable-e1000</option> configure option. It accepts the same syntax
+(for mac, ethmod, ethdev, script, bootrom) and supports the same networking modules
+as the NE2000 adapter.
 </para>
 </section>
 
@@ -6204,7 +6272,7 @@ shift or control) to restore the screen.
 
 <para>
 There are two strategies to fix this problem.  One is to increase the
-<command>ips</command> parameter of the <link linkend="bochsopt-cpu">cpu option</link>
+<command>ips</command> parameter of the <link linkend="bochsopt-cpu-ips">cpu option</link>
 in your configuration file. This will cause the simulation time
 to pass more slowly.  The other strategy is to enable the experimental
 realtime PIT, which tries to keep Bochs in sync with real time. See the <filename>bochsrc</filename>
@@ -6318,7 +6386,7 @@ md7
 
 <section id="SMP"><title>Simulating a Symmetric Multiprocessor (SMP) Machine</title>
 <para>
-Bochs can now simulate an SMP machine when you use "--enable-smp" in the
+Bochs can now simulate an SMP machine when you use <option>--enable-smp</option> in the
 configure command.  SMP support was added by Bryce Denney, who
 was very interested in watching a multiprocessor operating system work
 at a low level.  It should also be helpful to operating system developers
@@ -6585,7 +6653,7 @@ Some of the other options in this group is probably also needed,
 <section>
         <title>Configure Bochs to use the tuntap interface</title>
         <para>Make sure Bochs has ne2000 support. If you have to recompile Bochs,
-                <command>--enable-ne2000</command> when running <command>./configure</command>
+                <option>--enable-ne2000</option> when running <command>./configure</command>
                 (see <xref linkend="compiling">)
         </para>
         <para>edit your <replaceable>.bochsrc</replaceable> configuration file and add something like :
@@ -6941,7 +7009,7 @@ From here, you may use the following commands:
 To use instrumentation features in bochs, you must compile in support for it.
 You should build a custom instrumentation library in a separate directory in
 the "instrument/" directory.  To tell configure which instrumentation library
-you want to use, use the "--enable-instrumentation" option.
+you want to use, use the <option>--enable-instrumentation</option> option.
 
 The default library consists of a set of stubs, and the following are
 equivalent:
@@ -7049,7 +7117,7 @@ This section covers how you can use Bochs with a remote GDB stub to debug your k
 <para>
 The GDB stub is not active in standard Bochs binary package.  So you must recompile Bochs.
 Download the Bochs source package, unpack it and run the configure script
-with the <command>--enable-gdb-stub</command> argument.
+with the <option>--enable-gdb-stub</option> argument.
 
 <screen>
   $ ./configure --enable-gdb-stub
@@ -8880,17 +8948,11 @@ cpuid: cpuid_limit_winnt=1
 </section>
 
 <section id="guest-win2k">
-        <title>Windows 2000</title>
+        <title>Windows 2000 / Windows 2000 Server</title>
 <para>You must read the message regarding software licenses in
-<xref linkend="thirdparty"> before you install Windows 2000 as a guest operating system in Bochs.</para>
+<xref linkend="thirdparty"> before you install Windows 2000 / Windows 2000 Server as a guest operating system in Bochs.</para>
         <para>
         </para>
-
-</section>
-<section id="guest-win2k-server">
-<title>Windows 2000 Server</title>
-<para>You must read the message regarding software licenses in
-<xref linkend="thirdparty"> before you install Windows 2000 Server as a guest operating system in Bochs.</para>
 </section>
 
 <section id="guest-winxp">
@@ -8903,6 +8965,13 @@ cpuid: cpuid_limit_winnt=1
         </para>
 </section>
 
+<section id="guest-win7">
+        <title>Windows 7</title>
+<para>You must read the message regarding software licenses in
+<xref linkend="thirdparty"> before you install Windows 7 as a guest operating system in Bochs.</para>
+        <para>
+        </para>
+</section>
 
 <section id="guest-osr5">
 <title>SCO OpenServer 5.0.5</title>

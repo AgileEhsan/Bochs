@@ -194,6 +194,7 @@ bx_ne2k_c::~bx_ne2k_c()
   if (ethdev != NULL) {
     delete ethdev;
   }
+  SIM->get_bochs_root()->remove("ne2k");
   BX_DEBUG(("Exit"));
 }
 
@@ -1607,7 +1608,7 @@ void bx_ne2k_c::rx_frame(const void *buf, unsigned io_len)
   int pages;
   int avail;
   unsigned idx;
-  int wrapped;
+//int wrapped;
   int nextpage;
   unsigned char pkthdr[4];
   unsigned char *pktbuf = (unsigned char *) buf;
@@ -1633,7 +1634,7 @@ void bx_ne2k_c::rx_frame(const void *buf, unsigned io_len)
   } else {
     avail = (BX_NE2K_THIS s.page_stop - BX_NE2K_THIS s.page_start) -
       (BX_NE2K_THIS s.curr_page - BX_NE2K_THIS s.bound_ptr);
-    wrapped = 1;
+//  wrapped = 1;
   }
 
   // Avoid getting into a buffer overflow condition by not attempting
